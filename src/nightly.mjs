@@ -137,7 +137,13 @@ export async function visitProject({ project, deps, date, dryRun }) {
     }
   }
   for (const pr of open.filter((item) => !entries.some((e) => e.prUrl === item.url))) {
-    needsYou.push(`${name} still has an open pull request from an earlier night: ${pr.url}`);
+    if (history.prs.some((record) => record.number === pr.number)) {
+      needsYou.push(`${name} still has an open pull request from an earlier night: ${pr.url}`);
+    } else if (pr.headRefName.startsWith('nightshift/revert-')) {
+      needsYou.push(`${name} has an open revert pull request: ${pr.url}`);
+    } else {
+      needsYou.push(`${name} has an open pull request on a nightshift branch that this job did not record: ${pr.url}`);
+    }
   }
   const mayChange = !dryRun && !mergedEarlier && stillOpen < MAX_OPEN_PRS;
 
@@ -257,18 +263,30 @@ export async function visitProject({ project, deps, date, dryRun }) {
     };
     if (!verdict.merge) return leftOpen(verdict.reason);
 
-    const checks = await github.waitForChecks({ owner: project.owner, repo: project.repo, number: pr.number, timeoutMs: left(PR_CHECKS_LIMIT_MS) });
-    if (checks.state !== 'pass') {
-      const reason = { fail: checks.detail ? `Checks failed: ${checks.detail}` : 'Checks failed', none: 'Checks did not run', timeout: 'Checks did not finish in time' }[checks.state];
-      if (!keepPrivate) return leftOpen(reason);
-      await github.closePr({ owner: project.owner, repo: project.repo, number: pr.number, deleteBranch: true });
+    // A security change in a public repository that does not get merged tonight is taken
+    // back down, whatever the reason, so it is never left sitting in public.
+    const target = { owner: project.owner, repo: project.repo, number: pr.number };
+    const withdraw = async (reason) => {
+      await github.closePr({ ...target, deleteBranch: true });
       forget();
       entries.push(proposed(reason, null));
       needsYou.push(`${name} has a private security proposal: ${title}`);
-      return;
+    };
+    const notMerged = (reason) => (keepPrivate ? withdraw(reason) : leftOpen(reason));
+    let merged;
+    try {
+      const checks = await github.waitForChecks({ ...target, timeoutMs: left(PR_CHECKS_LIMIT_MS) });
+      if (checks.state !== 'pass') {
+        return notMerged({ fail: checks.detail ? `Checks failed: ${checks.detail}` : 'Checks failed', none: 'Checks did not run', timeout: 'Checks did not finish in time' }[checks.state]);
+      }
+      merged = await github.merge({ ...target, sha, method, admin });
+      if (!merged.ok) return notMerged(`Could not be merged: ${merged.reason}`);
+    } catch (error) {
+      if (keepPrivate) {
+        await github.closePr({ ...target, deleteBranch: true }).then(forget, () => {});
+      }
+      throw error;
     }
-    const merged = await github.merge({ owner: project.owner, repo: project.repo, number: pr.number, sha, method, admin });
-    if (!merged.ok) return leftOpen(`Could not be merged: ${merged.reason}`);
     forget();
     const live = await putLive(merged.mergeSha, ws.repoDir);
     entries.push(entry(name, 'did', title, `${detail} ${live.detail}`, { prUrl: pr.url, security, impact, liveState: live.liveState }));

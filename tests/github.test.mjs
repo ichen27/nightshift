@@ -67,6 +67,7 @@ test('listNightshiftPrs returns only open pull requests from nightshift/ branche
     { number: 4, url: 'https://github.com/octo/app/pull/4', headRefName: 'nightshift/2026-01-02', headRefOid: 'aaa' },
     { number: 5, url: 'https://github.com/octo/app/pull/5', headRefName: 'feature/x', headRefOid: 'bbb' },
     { number: 6, url: 'https://github.com/octo/app/pull/6', headRefName: 'nightshift-lookalike', headRefOid: 'ccc' },
+    { number: 7, url: 'https://github.com/octo/app/pull/7', headRefName: 'nightshift/2026-01-03', headRefOid: 'ddd', isCrossRepository: true },
   ];
   const { run, calls } = fakeRun([[has('pr', 'list'), { stdout: JSON.stringify(prs) }]]);
   const found = await createGithub({ run, ghPath: 'gh' }).listNightshiftPrs('octo', 'app');
@@ -74,6 +75,8 @@ test('listNightshiftPrs returns only open pull requests from nightshift/ branche
   const argv = calls[0].argv;
   assert.equal(argv[argv.indexOf('--repo') + 1], 'octo/app');
   assert.equal(argv[argv.indexOf('--state') + 1], 'open');
+  assert.match(argv[argv.indexOf('--json') + 1], /isCrossRepository/, 'a fork can name its branch anything, so forks must be told apart');
+  assert.deepEqual(Object.keys(found[0]).sort(), ['headRefName', 'headRefOid', 'number', 'url']);
 });
 
 test('listNightshiftPrs throws when gh fails', async () => {

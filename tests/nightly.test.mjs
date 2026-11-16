@@ -415,3 +415,33 @@ test('admin merge is used only for projects on the admin list', async () => {
   await w.night();
   assert.equal(w.did('merge')[0][1].admin, true);
 });
+
+test('a security change in a public repository is closed, not left open, when the merge is refused or a later step throws', async () => {
+  const secure = { ok: true, output: { findings: [], change: { ...change, security: true }, proposals: [] }, model: 'm', failure: null };
+  const refused = world({ agent: secure, merge: { ok: false, mergeSha: null, reason: 'not mergeable' } });
+  const report = await refused.night();
+  assert.deepEqual(report.entries.map((e) => [e.tag, e.security, e.prUrl, e.reason]), [['proposed', true, null, 'Could not be merged: not mergeable']]);
+  assert.deepEqual(refused.did('closePr')[0][1], { owner: 'octo', repo: 'app', number: 12, deleteBranch: true });
+  assert.deepEqual(refused.store.read('history/octo__app.json', null).prs, []);
+  assert.deepEqual(report.needsYou, ['octo/app has a private security proposal: Reject empty names when saving a profile']);
+
+  const thrown = world({ agent: secure });
+  thrown.deps.github.waitForChecks = async () => { throw new Error('gh crashed'); };
+  const second = await thrown.night();
+  assert.equal(thrown.did('closePr').length, 1, 'the pull request is closed before the error is reported');
+  assert.deepEqual(second.entries.map((e) => e.title), ['Visit did not finish']);
+});
+
+test('an ordinary change is left open when a later step throws', async () => {
+  const w = world();
+  w.deps.github.waitForChecks = async () => { throw new Error('gh crashed'); };
+  await w.night();
+  assert.equal(w.did('closePr').length, 0);
+});
+
+test('a pull request this job has no record of is reported as such and still counts toward the limit', async () => {
+  const stranger = { number: 30, url: 'https://github.com/octo/app/pull/30', headRefName: 'nightshift/hand-made', headRefOid: 'x' };
+  const w = world({ openPrs: [stranger], agent: { ok: true, output: { findings: [], change: null, proposals: [] }, model: 'm', failure: null } });
+  const report = await w.night();
+  assert.deepEqual(report.needsYou, ['octo/app has an open pull request on a nightshift branch that this job did not record: https://github.com/octo/app/pull/30']);
+});
