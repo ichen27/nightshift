@@ -1,0 +1,35 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 412345,
+  "duration_api_ms": 301234,
+  "num_turns": 23,
+  "result": "Done.",
+  "stop_reason": "end_turn",
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "total_cost_usd": 0,
+  "usage": { "input_tokens": 1200, "output_tokens": 5400 },
+  "modelUsage": {
+    "example-small-model": { "inputTokens": 300, "outputTokens": 40 },
+    "example-model": { "inputTokens": 900, "outputTokens": 5360 }
+  },
+  "permission_denials": [],
+  "structured_output": {
+    "findings": [
+      { "title": "saveProfile accepts an empty name", "detail": "src/profile.js stores whatever name it is given.", "security": false }
+    ],
+    "change": {
+      "title": "Reject empty names when saving a profile",
+      "summary": "saveProfile now returns a validation error for an empty name. A test covers it.",
+      "kind": "fix",
+      "security": false,
+      "majorUpgrade": false,
+      "claims": []
+    },
+    "proposals": [
+      { "title": "Split the date helpers into one module", "detail": "formatDay and toDayString do the same thing.", "security": false }
+    ]
+  },
+  "uuid": "00000000-0000-4000-8000-000000000001"
+}
