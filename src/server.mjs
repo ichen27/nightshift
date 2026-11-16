@@ -1,6 +1,7 @@
 // The web app: a small JSON API over the project list and reports, plus one static page.
 import { readFile } from 'node:fs/promises';
 import http from 'node:http';
+import { isProcessAlive } from './lock.mjs';
 import { ProjectError } from './projects.mjs';
 import { LinkError } from './repo-link.mjs';
 import { countEntries } from './report.mjs';
@@ -29,15 +30,6 @@ const REPO = /^[A-Za-z0-9._-]{1,100}$/;
 const pad = (n) => String(n).padStart(2, '0');
 const localDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-function defaultIsAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === 'EPERM';
-  }
-}
-
 // The scheduled times on either side of `now`, in the machine's local time.
 function scheduleTimes(now, { hour, minute }) {
   const on = (offset) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hour, minute);
@@ -53,7 +45,7 @@ function readSchedule(store) {
   return valid ? { hour: saved.hour, minute: saved.minute } : null;
 }
 
-export function createServer({ projects, store, now = () => new Date(), allowedHosts = null, isAlive = defaultIsAlive }) {
+export function createServer({ projects, store, now = () => new Date(), allowedHosts = null, isAlive = isProcessAlive }) {
   const allowed = allowedHosts ? new Set(allowedHosts.map((host) => host.toLowerCase())) : null;
 
   const reportDates = () =>
