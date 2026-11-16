@@ -25,7 +25,8 @@ The split matters: the model only reads, edits and commits inside a private clon
 | `public/` | The one page |
 | `src/rotation.mjs`, `src/lock.mjs` | Which projects tonight; one run at a time |
 | `src/report.mjs` | Report shape, counts, markdown |
-| `src/workspace.mjs` | Private clone and branch |
+| `src/workspace.mjs` | The job's trusted clone, the model's throwaway clone, and moving a change between them |
+| `src/sandbox.mjs`, `src/proxy.mjs` | Restricted environment, macOS sandbox, and the allow-listing proxy for sandboxed commands |
 | `src/measure.mjs` | Detect and run a repository's checks; read counts |
 | `src/agent.mjs`, `prompts/brief.md` | Build and run the headless Claude call |
 | `src/rules.mjs` | Merge or propose |
@@ -34,12 +35,11 @@ The split matters: the model only reads, edits and commits inside a private clon
 | `launchd/`, `scripts/install-schedule.mjs` | The schedule |
 | `tests/` | `node:test` suites, one per module |
 
-Files appear as the project is built; a path listed here that does not exist yet has not been written.
-
 ## Conventions
 
 - Node 25, ES modules, `node:http` and `node:test`. No runtime dependencies. Do not add one without a strong reason.
 - Subprocesses are argv arrays passed to `exec.mjs`. Never build a shell command string.
+- The job's own git and `gh` commands run only in `workspaces/<project>/repo`, never in the model's `tree/`. Anything run on code the model touched goes through the restricted runner in `sandbox.mjs`.
 - Anything that talks to GitHub, git remotes, Claude Code, launchd, the network or the clock is injected, so tests can replace it. Tests must pass on a clean GitHub-hosted Ubuntu runner with none of those available.
 - Runtime data lives in the data folder (`NIGHTSHIFT_DATA_DIR`, else `APP_DATA_DIR`), never in the repository.
 - UI copy is sentence case with no exclamation marks.
