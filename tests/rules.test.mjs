@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { run } from '../src/exec.mjs';
-import { changeStats, decide, isMajorUpgrade, isTestFile, provesItself, sensitiveReason } from '../src/rules.mjs';
+import { changeStats, decide, isMajorUpgrade, isTestFile, provesItself, readManifests, sensitiveReason } from '../src/rules.mjs';
 
 test('isTestFile recognizes test folders and test file names', () => {
   for (const path of ['tests/a.mjs', 'src/test/a.js', 'pkg/__tests__/a.js', 'AppTests/LoginTests.swift', 'src/a.test.ts',
@@ -307,4 +307,20 @@ test('a test file whose name looks like a pattern is taken literally', async () 
     baseSha: r.baseSha, sha: r.sha, files: ['tests/value.test.mjs', ':(top)*'], fs: realFs, timeoutMs: 60000, baselinePass: true });
   const checkouts = seen.filter((argv) => argv.includes('checkout') && argv.includes('--'));
   assert.ok(checkouts.length > 0 && checkouts.every((argv) => argv.includes('--literal-pathspecs')));
+});
+
+test('readManifests returns the before and after text of changed package files only', async () => {
+  const r = await repoWith({ testPassesOnBase: false });
+  await git(r.repo, 'checkout', '-q', '--detach', r.sha);
+  mkdirSync(join(r.repo, 'web'), { recursive: true });
+  writeFileSync(join(r.repo, 'package.json'), JSON.stringify({ type: 'module', scripts: { test: 'true' } }));
+  writeFileSync(join(r.repo, 'web', 'package-lock.json'), '{"lockfileVersion":3}');
+  await git(r.repo, 'add', '-A');
+  await git(r.repo, 'commit', '-q', '-m', 'manifests');
+  const sha = await git(r.repo, 'rev-parse', 'HEAD');
+  const manifests = await readManifests({ run, gitPath: 'git', repoDir: r.repo, baseSha: r.sha, sha, files: ['package.json', 'web/package-lock.json', 'value.mjs'] });
+  assert.deepEqual(Object.keys(manifests), ['package.json', 'web/package-lock.json']);
+  assert.match(manifests['package.json'].before, /node --test/);
+  assert.match(manifests['package.json'].after, /"test":"true"/);
+  assert.deepEqual(manifests['web/package-lock.json'], { before: null, after: '{"lockfileVersion":3}' });
 });
