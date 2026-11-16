@@ -38,6 +38,21 @@ export async function changeStats({ run, gitPath, repoDir, baseSha, sha }) {
   };
 }
 
+// The text of each changed package.json and package-lock.json before and after a change,
+// as { path: { before, after } }. A side is null when the file did not exist there.
+export async function readManifests({ run, gitPath, repoDir, baseSha, sha, files }) {
+  const manifests = {};
+  const show = async (commit, path) => {
+    const result = await git(run, gitPath, repoDir, ['--literal-pathspecs', 'show', `${commit}:${path}`], { allowFailure: true });
+    return result.code === 0 ? result.stdout : null;
+  };
+  for (const path of files) {
+    if (!['package.json', 'package-lock.json'].includes(path.split('/').pop())) continue;
+    manifests[path] = { before: await show(baseSha, path), after: await show(sha, path) };
+  }
+  return manifests;
+}
+
 const baseName = (path) => path.split('/').pop();
 
 export function isTestFile(path) {
