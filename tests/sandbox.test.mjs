@@ -153,3 +153,14 @@ test('on macOS a sandboxed command cannot reach the internet directly', { skip: 
   assert.match(loopback.stdout, /loopback 200/);
   await run(['rm', '-rf', root]);
 });
+
+test('a call can put extra tool folders at the front of PATH', async () => {
+  const { run: fake, calls } = fakeRun([[() => true, {}]]);
+  const restricted = createRestrictedRun({ run: fake, sandbox: false, ...options() });
+  await restricted(['node', '-v'], { cwd: '/t', writable: ['/t'], cacheDir: '/c', pathPrefix: ['/opt/node22/bin', '/opt/pnpm'] });
+  assert.equal(calls[0].options.env.PATH, '/opt/node22/bin:/opt/pnpm:/bin');
+  await restricted(['node', '-v'], { cwd: '/t', writable: ['/t'], cacheDir: '/c' });
+  assert.equal(calls[1].options.env.PATH, '/bin');
+  await assert.rejects(async () => restricted(['node'], { cwd: '/t', writable: ['/t'], cacheDir: '/c', pathPrefix: ['relative/bin'] }), /absolute/);
+  await assert.rejects(async () => restricted(['node'], { cwd: '/t', writable: ['/t'], cacheDir: '/c', pathPrefix: ['/a:/b'] }), /absolute/);
+});

@@ -23,63 +23,76 @@ export function detectCheck(dir, fs) {
   return null;
 }
 
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+const all = (text, pattern) => [...text.matchAll(pattern)];
+const sum = (numbers) => numbers.reduce((total, n) => total + n, 0);
+const passedIn = (text) => Number(/(\d+) passed/.exec(text)?.[1] ?? 0);
+
+// One reader per test runner. Each returns { ran, passed } or null. A repository may run
+// several suites in one check, so every summary a runner printed is added up.
 const SUMMARIES = [
   // node --test, TAP and spec reporters
   (text) => {
-    const ran = lastNumber(text, /^(?:#|ℹ) tests (\d+)\s*$/gm);
-    const passed = lastNumber(text, /^(?:#|ℹ) pass (\d+)\s*$/gm);
-    return ran !== null && passed !== null ? { ran, passed } : null;
+    const ran = all(text, /^(?:#|ℹ) tests (\d+)\s*$/gm);
+    const passed = all(text, /^(?:#|ℹ) pass (\d+)\s*$/gm);
+    return ran.length && passed.length ? { ran: sum(ran.map((m) => Number(m[1]))), passed: sum(passed.map((m) => Number(m[1]))) } : null;
   },
   // Jest: "Tests:  1 failed, 11 passed, 12 total"
   (text) => {
-    const line = lastMatch(text, /^Tests:\s+(.*?)(\d+) total\s*$/gm);
-    if (!line) return null;
-    const passed = /(\d+) passed/.exec(line[1]);
-    return { ran: Number(line[2]), passed: passed ? Number(passed[1]) : 0 };
+    const lines = all(text, /^Tests:\s+(.*?)(\d+) total\s*$/gm);
+    return lines.length ? { ran: sum(lines.map((m) => Number(m[2]))), passed: sum(lines.map((m) => passedIn(m[1]))) } : null;
   },
   // Vitest: "Tests  1 failed | 11 passed (12)"
   (text) => {
-    const line = lastMatch(text, /^\s*Tests\s+(.*?)\((\d+)\)\s*$/gm);
-    if (!line) return null;
-    const passed = /(\d+) passed/.exec(line[1]);
-    return { ran: Number(line[2]), passed: passed ? Number(passed[1]) : 0 };
+    const lines = all(text, /^\s*Tests\s+(.*?)\((\d+)\)\s*$/gm);
+    return lines.length ? { ran: sum(lines.map((m) => Number(m[2]))), passed: sum(lines.map((m) => passedIn(m[1]))) } : null;
   },
-  // XCTest: "Executed 12 tests, with 1 failure"
+  // XCTest prints a total per suite and then an overall one, so only the last counts.
   (text) => {
-    const line = lastMatch(text, /Executed (\d+) tests?, with (\d+) failures?/g);
+    const line = all(text, /Executed (\d+) tests?, with (\d+) failures?/g).pop();
     return line ? { ran: Number(line[1]), passed: Number(line[1]) - Number(line[2]) } : null;
   },
 ];
 
-function lastMatch(text, pattern) {
-  let last = null;
-  for (const match of text.matchAll(pattern)) last = match;
-  return last;
-}
-function lastNumber(text, pattern) {
-  const match = lastMatch(text, pattern);
-  return match ? Number(match[1]) : null;
-}
-
-// { ran, passed } from a test runner's summary, or null when the output is not recognized.
+// { ran, passed } across every test summary in a check's output, or null when none is recognized.
 export function parseTestCounts(output) {
-  const text = String(output ?? '');
-  for (const read of SUMMARIES) {
-    const counts = read(text);
-    if (counts) return counts;
-  }
-  return null;
+  const text = String(output ?? '').replace(ANSI, '');
+  const found = SUMMARIES.map((read) => read(text)).filter(Boolean);
+  if (found.length === 0) return null;
+  return { ran: sum(found.map((counts) => counts.ran)), passed: sum(found.map((counts) => counts.passed)) };
 }
 
-// Runs the repository's checks. Dependencies are installed from the lockfile first when the
-// check is an npm script, because a fresh clone has none.
+const MAX_PACKAGE_DEPTH = 3;
+
+// Folders holding a package-lock.json: the root first, then nested packages. A repository
+// can have several, and each needs its own install before the checks mean anything.
+function packageDirs(dir, fs, depth = 0) {
+  const found = fs.existsSync(join(dir, 'package-lock.json')) ? [dir] : [];
+  if (depth >= MAX_PACKAGE_DEPTH) return found;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries.filter((item) => item.isDirectory() && item.name !== 'node_modules' && !item.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name))) {
+    found.push(...packageDirs(join(dir, entry.name), fs, depth + 1));
+  }
+  return found;
+}
+
+// Runs the repository's checks. When the check is an npm script, dependencies are installed
+// from each lockfile first, because a fresh clone has none. A repository with its own
+// ci/run.sh installs for itself.
 export async function runCheck({ run, dir, fs, timeoutMs }) {
   const checkCommand = detectCheck(dir, fs);
   if (!checkCommand) return { checkCommand: null, pass: null, installFailed: false, output: '' };
-  if (checkCommand[0] === 'npm' && fs.existsSync(join(dir, 'package-lock.json'))) {
-    const install = await run(['npm', 'ci'], { cwd: dir, timeoutMs });
-    if (install.code !== 0 || install.timedOut) {
-      return { checkCommand, pass: false, installFailed: true, output: `${install.stdout}\n${install.stderr}` };
+  if (checkCommand[0] === 'npm') {
+    for (const packageDir of packageDirs(dir, fs)) {
+      const install = await run(['npm', 'ci'], { cwd: packageDir, timeoutMs });
+      if (install.code !== 0 || install.timedOut) {
+        return { checkCommand, pass: false, installFailed: true, output: `${install.stdout}\n${install.stderr}` };
+      }
     }
   }
   const result = await run(checkCommand, { cwd: dir, timeoutMs });

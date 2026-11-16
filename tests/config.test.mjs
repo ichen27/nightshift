@@ -65,4 +65,5 @@ test('the sandbox is required by default and its lists start empty', () => {
   assert.equal(DEFAULT_SETTINGS.allowUnsandboxed, false);
   assert.deepEqual(DEFAULT_SETTINGS.sandbox, { allowWrite: [], allowRead: [], denyRead: [], allowHosts: [] });
   assert.equal(DEFAULT_SETTINGS.identity, null);
+  assert.deepEqual(DEFAULT_SETTINGS.toolPaths, {});
 });

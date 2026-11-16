@@ -13,7 +13,7 @@ The screenshot uses made-up repositories.
 ## Status
 
 - **Web app:** working. Add and remove projects, read reports.
-- **Nightly job:** implemented and covered by unit tests with every outside system faked. It has **not yet completed a supervised run** against a real repository with the real model. The Claude Code flags it relies on were checked against the documentation, not yet against a live run, so expect adjustments.
+- **Nightly job:** implemented and covered by unit tests with every outside system faked. Cloning, installing, running a repository's checks inside the sandbox and reading the results have been exercised against real repositories. The model step has not: the job has **not yet completed a supervised run** with the real model, and the Claude Code flags it relies on were checked against the documentation only, so expect adjustments.
 - **Schedule:** an installer exists for macOS. Run the job by hand first.
 - **Platform:** the nightly job needs macOS, because that is where its sandbox comes from. The web app runs anywhere Node does.
 
