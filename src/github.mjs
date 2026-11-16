@@ -48,15 +48,19 @@ export function createGithub({ run, ghPath, gitPath = 'git', sleep = realSleep, 
     };
   }
 
+  // Open pull requests from branches named nightshift/… in the repository itself. A pull
+  // request from a fork is left out: anyone can give a fork's branch that name.
   async function listNightshiftPrs(owner, repo) {
     const result = await gh([
       'pr', 'list', '--repo', `${owner}/${repo}`, '--state', 'open', '--limit', '100',
-      '--json', 'number,url,headRefName,headRefOid',
+      '--json', 'number,url,headRefName,headRefOid,isCrossRepository',
     ]);
     if (result.code !== 0) {
       throw new Error(`Could not list pull requests for ${owner}/${repo}: ${firstLine(result.stderr) || 'gh failed'}`);
     }
-    return JSON.parse(result.stdout).filter((pr) => pr.headRefName.startsWith('nightshift/'));
+    return JSON.parse(result.stdout)
+      .filter((pr) => pr.headRefName.startsWith('nightshift/') && pr.isCrossRepository !== true)
+      .map(({ number, url, headRefName, headRefOid }) => ({ number, url, headRefName, headRefOid }));
   }
 
   // Pushes one of the job's own branches. Never the default branch, never anything else.
