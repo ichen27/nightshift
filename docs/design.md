@@ -66,6 +66,12 @@ Some files are never merged unattended whatever the checks say: CI, deploy confi
 
 A repository whose checks already fail gets proposals only, until a person has looked.
 
+### What the rules are not
+
+The rules stop careless and mislabelled changes. They are not a defence against a change written on purpose to get past them. Whether the checks pass, and how many tests ran, are both read from what the repository's own code does and prints, and the change is part of that code. A change that fakes a test summary, or ships a test that proves a "fix" which also does something else, can pass every rule here. The sandbox limits what such a change can reach while it is being checked; it does not judge what the change does once merged.
+
+So merged changes still deserve a look. Every one is a pull request with its measured before and after, and the report lists them. The protection against a model that has been talked into something is that it is hard to do quietly, not that it is impossible.
+
 ## Going live
 
 After a merge the job waits for the workflow runs it triggered. If any fail it reverts the merge through a pull request, which it merges only if that pull request's checks pass.
