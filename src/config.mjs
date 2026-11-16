@@ -6,6 +6,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   adminMerge: [],
   // { name, email } used to author every commit the job makes. Required for a run.
   identity: null,
+  // Extra folders for the sandbox the model and the checks run in.
+  sandbox: { allowWrite: [], allowRead: [], denyRead: [] },
+  // Only for platforms with no sandbox. Leaves the model limited by its environment alone.
+  allowUnsandboxed: false,
   vaultDir: null,
   launcherDir: null,
   launcherRegistry: null,
