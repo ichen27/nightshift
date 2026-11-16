@@ -11,9 +11,13 @@ const TEMP_DIRS = ['/private/tmp', '/private/var/folders', '/private/var/tmp'];
 const KEEP_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'TZ'];
 // Relative to the home folder.
 const PRIVATE_HOME_PATHS = [
-  '.config/gh', '.config/git', '.git-credentials', '.gitconfig', '.ssh', '.aws', '.azure', '.gnupg', '.docker',
-  '.kube', '.netrc', '.npmrc', '.claude', '.claude.json', '.codex', 'Library/Keychains', 'Library/Application Support',
-  'Library/Cookies', 'Library/Mail', 'Library/Messages', 'Documents', 'Desktop', 'Downloads',
+  // Sign-ins and keys.
+  '.config', '.git-credentials', '.gitconfig', '.ssh', '.aws', '.azure', '.gnupg', '.docker', '.kube', '.netrc', '.npmrc',
+  '.claude', '.claude.json', '.codex', 'Library/Keychains', 'Library/Application Support', 'Library/Cookies',
+  // Shell start-up files and history, where tokens tend to end up.
+  '.zshrc', '.zshenv', '.zprofile', '.zsh_history', '.bashrc', '.bash_profile', '.bash_history', '.profile',
+  // Personal files.
+  'Library/Mail', 'Library/Messages', 'Documents', 'Desktop', 'Downloads',
 ];
 
 export function sandboxSupported({ platform = process.platform, existsSync: exists = existsSync } = {}) {

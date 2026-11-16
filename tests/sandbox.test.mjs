@@ -75,7 +75,8 @@ test('a restricted run wraps the command in sandbox-exec with the restricted env
     assert.match(profile.slice(profile.indexOf('(allow file-write*'), profile.indexOf('(deny file-read-data')), new RegExp(`\\(subpath "${path}"\\)`));
   }
   const denied = profile.slice(profile.indexOf('(deny file-read-data'), profile.indexOf('(allow file-read-data'));
-  for (const path of ['/data', '/vol/tools', '/home/me/.config/gh', '/home/me/.ssh', '/home/me/.claude', '/home/me/Documents']) {
+  for (const path of ['/data', '/vol/tools', '/home/me/.config', '/home/me/.ssh', '/home/me/.claude', '/home/me/Documents',
+    '/home/me/.zshrc', '/home/me/.zsh_history', '/home/me/.bash_history', '/home/me/.zshenv', '/home/me/.profile']) {
     assert.match(denied, new RegExp(`"${path.replaceAll('.', '\\.')}"`), path);
   }
   const reallowed = profile.slice(profile.indexOf('(allow file-read-data'));
