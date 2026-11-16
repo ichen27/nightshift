@@ -1,0 +1,6 @@
+node_modules/
+launcher.json
+.env*
+data/
+.superpowers/
+.DS_Store
