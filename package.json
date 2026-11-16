@@ -1,0 +1,17 @@
+{
+  "name": "nightshift",
+  "version": "0.1.0",
+  "description": "Nightly upkeep for a list of GitHub repos, with a report of what changed",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=25"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "ci": "npm run check && npm test"
+  }
+}
