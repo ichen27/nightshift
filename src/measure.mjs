@@ -75,17 +75,18 @@ export function parseTestCounts(output) {
 // check is an npm script, because a fresh clone has none.
 export async function runCheck({ run, dir, fs, timeoutMs }) {
   const checkCommand = detectCheck(dir, fs);
-  if (!checkCommand) return { checkCommand: null, pass: null, output: '' };
+  if (!checkCommand) return { checkCommand: null, pass: null, installFailed: false, output: '' };
   if (checkCommand[0] === 'npm' && fs.existsSync(join(dir, 'package-lock.json'))) {
     const install = await run(['npm', 'ci'], { cwd: dir, timeoutMs });
     if (install.code !== 0 || install.timedOut) {
-      return { checkCommand, pass: false, output: `${install.stdout}\n${install.stderr}` };
+      return { checkCommand, pass: false, installFailed: true, output: `${install.stdout}\n${install.stderr}` };
     }
   }
   const result = await run(checkCommand, { cwd: dir, timeoutMs });
   return {
     checkCommand,
     pass: result.code === 0 && !result.timedOut,
+    installFailed: false,
     output: `${result.stdout}\n${result.stderr}`,
   };
 }
