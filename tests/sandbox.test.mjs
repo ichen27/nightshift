@@ -120,3 +120,35 @@ test('on macOS the sandbox really blocks outside writes and denied reads', { ski
     await run(['rm', '-rf', outside, root]);
   }
 });
+
+test('with a sandbox, the internet is closed and only loopback and sockets in the writable folders stay open', () => {
+  const profile = sandboxProfile({ writable: ['/data/tree'], denyRead: [], readable: [] });
+  const net = profile.slice(profile.indexOf('(deny network-outbound)'));
+  assert.match(net, /^\(deny network-outbound\)\n\(allow network-outbound \(remote ip "localhost:\*"\)\)\n\(allow network-outbound \(subpath "\/data\/tree"\)\)/);
+});
+
+test('a proxy address is handed to the sandboxed command through the usual variables', async () => {
+  const { run: fake, calls } = fakeRun([[() => true, {}]]);
+  const restricted = createRestrictedRun({ run: fake, sandbox: true, proxyUrl: 'http://127.0.0.1:4321', ...options() });
+  await restricted(['npm', 'ci'], { cwd: '/t', writable: ['/t'], cacheDir: '/c' });
+  const env = calls[0].options.env;
+  for (const key of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) assert.equal(env[key], 'http://127.0.0.1:4321', key);
+  assert.equal(env.NO_PROXY, 'localhost,127.0.0.1,::1');
+  assert.equal(env.NODE_USE_ENV_PROXY, '1');
+});
+
+test('on macOS a sandboxed command cannot reach the internet directly', { skip: process.platform !== 'darwin' }, async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nightshift-net-')));
+  const restricted = createRestrictedRun({
+    run, sandbox: true, home: process.env.HOME, dataDir: join(root, 'data'), emptyDir: join(root, 'empty'), env: process.env, settings: {},
+  });
+  const opts = { cwd: root, writable: [join(root, 'tree')], cacheDir: join(root, 'cache'), timeoutMs: 20000 };
+  // A public address by number, so the result does not depend on name lookups.
+  const direct = await restricted([process.execPath, '-e',
+    "require('net').connect(443,'1.1.1.1').on('connect',()=>{console.log('CONNECTED');process.exit(0)}).on('error',(e)=>{console.log('blocked',e.code);process.exit(0)});setTimeout(()=>{console.log('blocked timeout');process.exit(0)},4000)"], opts);
+  assert.doesNotMatch(direct.stdout, /CONNECTED/);
+  const loopback = await restricted([process.execPath, '-e',
+    "const h=require('http');const s=h.createServer((q,r)=>r.end('ok')).listen(0,'127.0.0.1',()=>h.get('http://127.0.0.1:'+s.address().port,(r)=>{console.log('loopback',r.statusCode);s.close()}))"], opts);
+  assert.match(loopback.stdout, /loopback 200/);
+  await run(['rm', '-rf', root]);
+});
