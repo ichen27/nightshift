@@ -59,18 +59,19 @@ test('sandboxSupported is true only on macOS with sandbox-exec present', () => {
 
 const options = (over = {}) => ({
   ensureDir: () => {}, home: '/home/me', dataDir: '/data', emptyDir: '/data/empty', env: { PATH: '/bin', HOME: '/home/me', GH_TOKEN: 'x' },
-  settings: { sandbox: { allowWrite: ['/opt/extra-write'], allowRead: ['/vol/tools/browsers'], denyRead: ['/vol/tools'] } },
+  settings: { sandbox: { allowWrite: ['/opt/extra-write'], allowRead: ['/vol/tools/browsers'], denyRead: ['/vol/tools'], allowPorts: [6543] } },
   ...over,
 });
 
 test('a restricted run wraps the command in sandbox-exec with the restricted environment', async () => {
   const { run: fake, calls } = fakeRun([[() => true, {}]]);
-  const restricted = createRestrictedRun({ run: fake, sandbox: true, ...options() });
+  const written = [];
+  const restricted = createRestrictedRun({ run: fake, sandbox: true, ...options(), writeProfile: (text) => { written.push(text); return '/data/sandbox-profiles/abc.sb'; } });
   await restricted(['npm', 'test'], { cwd: '/data/workspaces/octo__app/tree', timeoutMs: 5, writable: ['/data/workspaces/octo__app/tree'], cacheDir: '/data/workspaces/octo__app/cache' });
   const { argv, options: passed } = calls[0];
-  assert.deepEqual([argv[0], argv[1]], ['/usr/bin/sandbox-exec', '-p']);
-  assert.deepEqual(argv.slice(3), ['npm', 'test']);
-  const profile = argv[2];
+  assert.deepEqual(argv, ['/usr/bin/sandbox-exec', '-f', '/data/sandbox-profiles/abc.sb', 'npm', 'test'], 'the profile is a file the job owns, not an argument');
+  const profile = written[0];
+  assert.ok(profile.includes('(remote ip "localhost:6543")'), 'ports from settings are allowed');
   for (const path of ['/data/workspaces/octo__app/tree', '/data/workspaces/octo__app/cache', '/opt/extra-write']) {
     assert.match(profile.slice(profile.indexOf('(allow file-write*'), profile.indexOf('(deny file-read-data')), new RegExp(`\\(subpath "${path}"\\)`));
   }
@@ -122,15 +123,40 @@ test('on macOS the sandbox really blocks outside writes and denied reads', { ski
   }
 });
 
-test('with a sandbox, the internet is closed and only loopback and sockets in the writable folders stay open', () => {
+test('the internet is closed, and loopback is open only on ports the system hands out, plus listed ones', () => {
+  const profile = sandboxProfile({ writable: ['/data/tree'], denyRead: [], readable: [], allowPorts: [5432] });
+  assert.match(profile, /\(deny network-outbound\)/);
+  assert.doesNotMatch(profile, /localhost:\*/);
+  for (const port of [49152, 55000, 65535, 5432]) assert.ok(profile.includes(`(remote ip "localhost:${port}")`), String(port));
+  for (const port of [49151, 8950, 8790, 3000, 80, 443, 11434]) assert.equal(profile.includes(`"localhost:${port}"`), false, String(port));
+  assert.match(profile, /\(allow network-outbound \(subpath "\/data\/tree"\)\)/);
+});
+
+test('a port that is not a port is refused', () => {
+  for (const bad of [0, 70000, 1.5, '5432', -1]) {
+    assert.throws(() => sandboxProfile({ writable: ['/t'], denyRead: [], readable: [], allowPorts: [bad] }), /port/);
+  }
+});
+
+test('the profile blocks the ways out of a sandbox that are not files or sockets', () => {
   const profile = sandboxProfile({ writable: ['/data/tree'], denyRead: [], readable: [] });
-  const net = profile.slice(profile.indexOf('(deny network-outbound)'));
-  assert.match(net, /^\(deny network-outbound\)\n\(allow network-outbound \(remote ip "localhost:\*"\)\)\n\(allow network-outbound \(subpath "\/data\/tree"\)\)/);
+  for (const rule of ['(deny lsopen)', '(deny appleevent-send)', '(deny job-creation)']) assert.ok(profile.includes(rule), rule);
+  const mach = /\(deny mach-lookup ([^\n]*)\)/.exec(profile)[1];
+  for (const service of ['com.apple.SecurityServer', 'com.apple.securityd', 'com.apple.pasteboard.1', 'com.apple.lsd.open']) {
+    assert.ok(mach.includes(`(global-name "${service}")`), service);
+  }
+  for (const needed of ['com.apple.coreservices.launchservicesd', 'com.apple.lsd.mapdb']) {
+    assert.equal(mach.includes(needed), false, `${needed}: a headless browser needs it to start and to upload files; launching is blocked by lsopen instead`);
+  }
+  const exec = /\(deny process-exec ([^\n]*)\)/.exec(profile)[1];
+  for (const tool of ['/usr/bin/open', '/usr/bin/osascript', '/usr/bin/security', '/bin/launchctl', '/usr/bin/pbpaste']) {
+    assert.ok(exec.includes(`(literal "${tool}")`), tool);
+  }
 });
 
 test('a proxy address is handed to the sandboxed command through the usual variables', async () => {
   const { run: fake, calls } = fakeRun([[() => true, {}]]);
-  const restricted = createRestrictedRun({ run: fake, sandbox: true, proxyUrl: 'http://127.0.0.1:4321', ...options() });
+  const restricted = createRestrictedRun({ run: fake, sandbox: true, proxyUrl: 'http://127.0.0.1:4321', ...options(), writeProfile: () => '/p.sb' });
   await restricted(['npm', 'ci'], { cwd: '/t', writable: ['/t'], cacheDir: '/c' });
   const env = calls[0].options.env;
   for (const key of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) assert.equal(env[key], 'http://127.0.0.1:4321', key);
@@ -163,4 +189,45 @@ test('a call can put extra tool folders at the front of PATH', async () => {
   assert.equal(calls[1].options.env.PATH, '/bin');
   await assert.rejects(async () => restricted(['node'], { cwd: '/t', writable: ['/t'], cacheDir: '/c', pathPrefix: ['relative/bin'] }), /absolute/);
   await assert.rejects(async () => restricted(['node'], { cwd: '/t', writable: ['/t'], cacheDir: '/c', pathPrefix: ['/a:/b'] }), /absolute/);
+});
+
+test('the profile file is written once per distinct profile, inside the data folder, readable only by the owner', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nightshift-prof-')));
+  const { run: fake, calls } = fakeRun([[() => true, {}]]);
+  const restricted = createRestrictedRun({ run: fake, sandbox: true, home: '/home/me', dataDir: join(root, 'data'), emptyDir: join(root, 'empty'), env: { PATH: '/bin' }, settings: {} });
+  const opts = { cwd: root, writable: [join(root, 'tree')], cacheDir: join(root, 'cache') };
+  await restricted(['a'], opts);
+  await restricted(['b'], opts);
+  await restricted(['c'], { ...opts, writable: [join(root, 'other')] });
+  const files = calls.map((c) => c.argv[2]);
+  assert.equal(files[0], files[1]);
+  assert.notEqual(files[0], files[2]);
+  assert.ok(files[0].startsWith(join(root, 'data', 'sandbox-profiles') + '/'));
+  const { statSync, readFileSync } = await import('node:fs');
+  assert.equal(statSync(files[0]).mode & 0o777, 0o600);
+  assert.match(readFileSync(files[0], 'utf8'), /^\(version 1\)/);
+});
+
+test('on macOS a sandboxed command cannot reach a local service on an ordinary port', { skip: process.platform !== 'darwin' }, async () => {
+  const http = await import('node:http');
+  const server = http.createServer((req, res) => res.end('private'));
+  const port = await new Promise((resolve) => {
+    server.once('error', () => resolve(null));
+    server.listen(39217, '127.0.0.1', () => resolve(39217));
+  });
+  if (port === null) return; // Something else has the port; nothing to test against.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nightshift-port-')));
+  try {
+    const restricted = createRestrictedRun({ run, sandbox: true, home: process.env.HOME, dataDir: join(root, 'data'), emptyDir: join(root, 'empty'), env: process.env, settings: {} });
+    const opts = { cwd: root, writable: [join(root, 'tree')], cacheDir: join(root, 'cache'), timeoutMs: 30000 };
+    const probe = "require('http').get('http://127.0.0.1:39217',(r)=>{console.log('REACHED',r.statusCode);process.exit(0)}).on('error',(e)=>{console.log('blocked',e.code);process.exit(0)})";
+    const blocked = await restricted([process.execPath, '-e', probe], opts);
+    assert.doesNotMatch(blocked.stdout, /REACHED/);
+    assert.match(blocked.stdout, /blocked/);
+    const allowed = createRestrictedRun({ run, sandbox: true, home: process.env.HOME, dataDir: join(root, 'data'), emptyDir: join(root, 'empty'), env: process.env, settings: { sandbox: { allowPorts: [39217] } } });
+    assert.match((await allowed([process.execPath, '-e', probe], opts)).stdout, /REACHED 200/);
+  } finally {
+    server.close();
+    await run(['rm', '-rf', root]);
+  }
 });

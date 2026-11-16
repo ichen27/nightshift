@@ -84,7 +84,9 @@ Projects on the `hold` list are merged but never restarted by the job. Use it fo
 
 See the safety model in the [README](../README.md#safety-model) for what the sandbox covers and what it does not. In short: an environment with no credentials in it; an OS sandbox that can write only to the project's working folders and cannot read credential folders, documents or the data folder; no direct internet, only an allow-listing proxy; a Claude sign-in by token, with a config folder that is emptied before and after every run so nothing persists from one run to the next.
 
-Loopback is left open so projects' tests can run local servers. Blocking individual local ports did not work reliably in the macOS sandbox alongside a general network rule, and sandboxes cannot be nested, so this is a known gap rather than an oversight.
+Loopback is open only on the port range the system hands out when a program asks for any free port, because that is what a project's own test servers use. Services run on purpose sit on ordinary ports below that range and cannot be reached unless listed in `sandbox.allowPorts`. (Blocking individual ports does not work in the macOS sandbox next to a general network rule, so the profile allows the automatic range port by port instead. That makes the profile large and adds about three seconds to each sandboxed command.)
+
+The profile also closes routes out that are neither files nor sockets: launching apps, sending Apple Events, creating launchd jobs, and the keychain and clipboard services. Two launch-services names stay reachable because a headless browser needs them to start and to upload a file; launching through them is blocked separately. The profile starts from "allow" and removes what is known to be dangerous, so it is a strong fence, not a virtual machine.
 
 ## Privacy
 

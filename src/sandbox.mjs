@@ -2,11 +2,39 @@
 // runs through here: a short allow-listed environment with no credentials in it and, on
 // macOS, an OS sandbox that can write only to the project's own working folders and cannot
 // read the places credentials and private files live.
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 
+// The ports the system hands out when a program asks for "any free port", which is what a
+// test's own server does. Services people run on purpose sit on ordinary ports below these.
+const AUTOMATIC_PORTS = [49152, 65535];
+const PORTS_PER_RULE = 4096; // A single rule with the whole range does not compile.
+const loopback = (port) => `(remote ip "localhost:${port}")`;
+const AUTOMATIC_PORT_RULES = (() => {
+  const rules = [];
+  for (let from = AUTOMATIC_PORTS[0]; from <= AUTOMATIC_PORTS[1]; from += PORTS_PER_RULE) {
+    const ports = [];
+    for (let port = from; port < from + PORTS_PER_RULE && port <= AUTOMATIC_PORTS[1]; port += 1) ports.push(loopback(port));
+    rules.push(`(allow network-outbound ${ports.join(' ')})`);
+  }
+  return rules;
+})();
+// Ways out of a sandbox that are neither files nor sockets: asking another program to do
+// something on the sandboxed one's behalf.
+// (Two launch-services names are deliberately not here: a headless browser needs one to
+// start and the other to work out the type of a file it uploads. Launching things through
+// them is what `(deny lsopen)` stops.)
+const BLOCKED_SERVICES = [
+  'com.apple.SecurityServer', 'com.apple.securityd', 'com.apple.securityd.xpc', 'com.apple.security.agent',
+  'com.apple.pasteboard.1', 'com.apple.lsd.open',
+];
+const BLOCKED_TOOLS = [
+  '/usr/bin/open', '/usr/bin/osascript', '/usr/bin/security', '/bin/launchctl', '/usr/bin/pbpaste', '/usr/bin/pbcopy',
+  '/usr/sbin/screencapture',
+];
 const TEMP_DIRS = ['/private/tmp', '/private/var/folders', '/private/var/tmp'];
 const KEEP_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'TZ'];
 // Relative to the home folder.
@@ -32,9 +60,14 @@ function quote(path) {
 }
 
 // A Seatbelt profile. Later rules win, so the readable list is applied after the denied one.
-// Outbound network is closed except loopback (a project's own tests, and the job's proxy)
-// and sockets inside the given folders.
-export function sandboxProfile({ writable, denyRead, readable, sockets = writable }) {
+// Outbound network is closed except: loopback on ports the system hands out (a project's own
+// test servers, and the job's proxy), loopback on any listed port, and sockets inside the
+// given folders. Launching apps, scripting other apps, creating background jobs, and
+// reaching the keychain or the clipboard are closed too.
+export function sandboxProfile({ writable, denyRead, readable, sockets = writable, allowPorts = [] }) {
+  if (allowPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65535)) {
+    throw new Error('A sandbox port must be a whole number from 1 to 65535.');
+  }
   const lines = [
     '(version 1)',
     '(allow default)',
@@ -43,8 +76,17 @@ export function sandboxProfile({ writable, denyRead, readable, sockets = writabl
   ];
   if (denyRead.length) lines.push(`(deny file-read-data ${denyRead.map(quote).join(' ')})`);
   if (readable.length) lines.push(`(allow file-read-data ${readable.map(quote).join(' ')})`);
-  lines.push('(deny network-outbound)', '(allow network-outbound (remote ip "localhost:*"))');
+  lines.push('(deny network-outbound)', ...AUTOMATIC_PORT_RULES);
+  const listed = allowPorts.filter((port) => port < AUTOMATIC_PORTS[0]);
+  if (listed.length) lines.push(`(allow network-outbound ${listed.map(loopback).join(' ')})`);
   if (sockets.length) lines.push(`(allow network-outbound ${sockets.map(quote).join(' ')})`);
+  lines.push(
+    '(deny lsopen)',
+    '(deny appleevent-send)',
+    '(deny job-creation)',
+    `(deny mach-lookup ${BLOCKED_SERVICES.map((name) => `(global-name "${name}")`).join(' ')})`,
+    `(deny process-exec ${BLOCKED_TOOLS.map((path) => `(literal "${path}")`).join(' ')})`,
+  );
   return `${lines.join('\n')}\n`;
 }
 
@@ -88,8 +130,20 @@ const real = (path) => {
 export function createRestrictedRun({
   run, sandbox, home, dataDir, emptyDir, env, settings, proxyUrl = null,
   ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
+  writeProfile = null,
 }) {
   const custom = settings?.sandbox ?? {};
+  // The profile is large, and it is kept in the data folder, which sandboxed commands can
+  // neither read nor write, so one command cannot loosen the rules for the next.
+  const saveProfile = writeProfile ?? ((text) => {
+    const dir = join(dataDir, 'sandbox-profiles');
+    const file = join(dir, `${createHash('sha256').update(text).digest('hex').slice(0, 32)}.sb`);
+    if (!existsSync(file)) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file, text, { mode: 0o600 });
+    }
+    return file;
+  });
   return function restrictedRun(argv, { cwd, timeoutMs, writable = [], cacheDir, env: extraEnv = {}, pathPrefix = [] } = {}) {
     if (pathPrefix.some((folder) => typeof folder !== 'string' || !folder.startsWith('/') || folder.includes(':'))) {
       throw new Error('Tool folders must be absolute paths.');
@@ -108,7 +162,8 @@ export function createRestrictedRun({
       readable: [...writable, cacheDir, emptyDir, ...(custom.allowRead ?? [])].map(real),
       // Not the shared temporary folders: other programs keep their own sockets there.
       sockets: [...writable, cacheDir].map(real),
+      allowPorts: custom.allowPorts ?? [],
     });
-    return run([SANDBOX_EXEC, '-p', profile, ...argv], { cwd, timeoutMs, env: runEnv });
+    return run([SANDBOX_EXEC, '-f', saveProfile(profile), ...argv], { cwd, timeoutMs, env: runEnv });
   };
 }
