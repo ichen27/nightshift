@@ -90,11 +90,16 @@ export function createRestrictedRun({
   ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
 }) {
   const custom = settings?.sandbox ?? {};
-  return function restrictedRun(argv, { cwd, timeoutMs, writable = [], cacheDir, env: extraEnv = {} } = {}) {
+  return function restrictedRun(argv, { cwd, timeoutMs, writable = [], cacheDir, env: extraEnv = {}, pathPrefix = [] } = {}) {
+    if (pathPrefix.some((folder) => typeof folder !== 'string' || !folder.startsWith('/') || folder.includes(':'))) {
+      throw new Error('Tool folders must be absolute paths.');
+    }
     for (const dir of [emptyDir, cacheDir, join(cacheDir, 'tmp'), join(cacheDir, 'npm'), join(cacheDir, 'xdg'), ...writable]) {
       ensureDir(dir);
     }
     const runEnv = restrictedEnv(env, { emptyDir: real(emptyDir), cacheDir: real(cacheDir), proxyUrl, extra: extraEnv });
+    // A project that needs its own toolchain (another Node version, say) gets it first on PATH.
+    if (pathPrefix.length) runEnv.PATH = [...pathPrefix, runEnv.PATH].filter(Boolean).join(':');
     if (!sandbox) return run(argv, { cwd, timeoutMs, env: runEnv });
     const canWrite = [...writable, cacheDir, ...TEMP_DIRS, ...(custom.allowWrite ?? [])].map(real);
     const profile = sandboxProfile({

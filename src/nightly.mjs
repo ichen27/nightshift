@@ -152,7 +152,11 @@ export async function visitProject({ project, deps, date, dryRun }) {
   for (let n = 2; open.some((pr) => pr.headRefName === branch); n += 1) branch = `nightshift/${date}-${n}`;
   const identity = settings.identity;
   const ws = await steps.prepareWorkspace({ run, gitPath, dataDir: deps.dataDir, project: current, date, identity, branch });
-  const checkRunFor = (dir) => (argv, options = {}) => restrictedRun(argv, { ...options, writable: [dir], cacheDir: ws.cacheDir });
+  // Everything run for this project gets the project's own tool folders first on PATH.
+  const listedTools = Object.entries(settings.toolPaths ?? {}).find(([listed]) => sameName(listed, name));
+  const pathPrefix = listedTools ? listedTools[1] : [];
+  const sandboxed = (argv, options = {}) => restrictedRun(argv, { ...options, pathPrefix });
+  const checkRunFor = (dir) => (argv, options = {}) => sandboxed(argv, { ...options, writable: [dir], cacheDir: ws.cacheDir });
   const baseline = await steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
   if (baseline.checksPass === false) {
     needsYou.push(`${name}: the checks are failing on ${base}, so nothing can be merged.`);
@@ -162,7 +166,7 @@ export async function visitProject({ project, deps, date, dryRun }) {
   const brief = renderBrief({ project: name, mayChange, isPublic: current.isPublic, knownFindings: history.seenTitles });
   const claudeDir = join(ws.cacheDir, 'claude');
   const call = buildAgentCall({ claudePath: deps.claudePath, brief, claudeDir, token: deps.claudeToken });
-  const agent = await steps.runAgent({ restrictedRun, call, cwd: ws.dir, cacheDir: ws.cacheDir, claudeDir, timeoutMs: left(AGENT_LIMIT_MS) });
+  const agent = await steps.runAgent({ restrictedRun: sandboxed, call, cwd: ws.dir, cacheDir: ws.cacheDir, claudeDir, timeoutMs: left(AGENT_LIMIT_MS) });
   model = agent.model;
   if (!agent.ok) {
     entries.push(entry(name, 'found', 'Inspection did not finish', agent.failure));
@@ -212,7 +216,7 @@ export async function visitProject({ project, deps, date, dryRun }) {
     const keepPrivate = security && current.isPublic;
 
     const imported = await steps.importChange({
-      run, restrictedRun, gitPath, repoDir: ws.repoDir, dir: ws.dir, cacheDir: ws.cacheDir, baseSha: ws.baseSha, message: title, identity,
+      run, restrictedRun: sandboxed, gitPath, repoDir: ws.repoDir, dir: ws.dir, cacheDir: ws.cacheDir, baseSha: ws.baseSha, message: title, identity,
     });
     if (!imported) {
       entries.push(entry(name, 'found', title, 'The model described this change but did not commit it, so nothing was pushed.', { security }));

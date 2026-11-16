@@ -61,7 +61,7 @@ function world(over = {}) {
       const answer = argv.join(' ') === 'gh api user --jq .login' ? o.ghAuth : argv.includes('--version') ? o.claudeVersion : {};
       return { code: 0, stdout: '', stderr: '', timedOut: false, ...answer };
     },
-    restrictedRun: async () => ({ code: 0, stdout: '', stderr: '', timedOut: false }),
+    restrictedRun: async (argv, options) => { calls.push(['restrictedRun', { argv, options }]); return { code: 0, stdout: '', stderr: '', timedOut: false }; },
     fs: {
       existsSync: () => !o.vaultFails,
       mkdirSync: () => {},
@@ -444,4 +444,21 @@ test('a pull request this job has no record of is reported as such and still cou
   const w = world({ openPrs: [stranger], agent: { ok: true, output: { findings: [], change: null, proposals: [] }, model: 'm', failure: null } });
   const report = await w.night();
   assert.deepEqual(report.needsYou, ['octo/app has an open pull request on a nightshift branch that this job did not record: https://github.com/octo/app/pull/30']);
+});
+
+test('a project\'s tool folders are put on the PATH of everything run for it', async () => {
+  const w = world({ settings: { toolPaths: { 'Octo/App': ['/opt/node22/bin'] } } });
+  w.deps.steps.measure = async ({ run }) => { await run(['npm', 'test'], { cwd: '/ws/tree', timeoutMs: 5 }); return ok; };
+  w.deps.steps.runAgent = async ({ restrictedRun, call, cwd, cacheDir }) => {
+    await restrictedRun(call.argv, { cwd, cacheDir, writable: [cwd], env: call.env });
+    return { ok: true, output: { findings: [], change: null, proposals: [] }, model: 'm', failure: null };
+  };
+  await w.night();
+  const runs = w.did('restrictedRun').map(([, r]) => r);
+  assert.ok(runs.length >= 2);
+  assert.ok(runs.every((r) => JSON.stringify(r.options.pathPrefix) === '["/opt/node22/bin"]'), 'checks and the model both get the project\'s tools');
+  const plain = world();
+  plain.deps.steps.measure = async ({ run }) => { await run(['npm', 'test'], { cwd: '/ws/tree' }); return ok; };
+  await plain.night();
+  assert.deepEqual(plain.did('restrictedRun')[0][1].options.pathPrefix, []);
 });

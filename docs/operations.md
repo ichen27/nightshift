@@ -15,6 +15,7 @@ Lives in the data folder. Every key is optional except `identity`, which a run n
 | `vaultDir` | A notes vault. Each night's report is also written to `<vaultDir>/my-knowledge-base/raw/nightshift/<date>.md`. | none |
 | `launcherDir` | Checkout of the process launcher whose `src/cli.mjs restart <id>` restarts an app. | none |
 | `launcherRegistry` | Path to that launcher's registry file, used to find which app runs from which checkout. | none |
+| `toolPaths` | Per project, folders to put first on `PATH` for its checks and for the model, for a project that needs its own toolchain: `{ "owner/repo": ["/path/to/node22/bin"] }`. | `{}` |
 | `sandbox.allowWrite` | Extra folders sandboxed commands may write to. | `[]` |
 | `sandbox.allowRead` | Folders to re-allow inside a denied area. | `[]` |
 | `sandbox.denyRead` | Extra folders sandboxed commands may not read. Add anywhere secrets or other projects live. | `[]` |
@@ -36,6 +37,10 @@ chmod 600 "$NIGHTSHIFT_DATA_DIR/claude-token"
 ```
 
 The job passes it to the model's own process and nowhere else. It does not use your everyday Claude Code sign-in or settings.
+
+## How a project's checks are found
+
+In order: `ci/run.sh` if the repository has one (it is expected to install what it needs); otherwise the `ci` script in `package.json`, then the `test` script; otherwise `swift test` for a Swift package. For an npm script, the job first runs `npm ci` in every folder that has a `package-lock.json`, the root first, so a repository with more than one package is installed fully. A repository with none of these has no checks as far as the job can tell, and nothing is ever merged there.
 
 ## Run by hand
 
@@ -71,6 +76,8 @@ Logs are in `~/Library/Logs/nightshift/run.log`. The log names each project as i
 Look at the report's reason. Common causes:
 
 - **"The repository's checks do not pass with the change"** on every visit, with a note that the checks are failing: the checks fail inside the sandbox before any change. Run them the same way to see why. If they need to write somewhere else, add it to `sandbox.allowWrite`. If an install needs another host, the log names it; add it to `sandbox.allowHosts`. Browser tests that start their own sandbox cannot run inside this one.
+- The same note, and the project pins a tool version you do not have first on `PATH` (a `package.json` `engines` range, for example): point `toolPaths` at the right one.
+- Tests that drive a browser need to read the browser's files. If they live somewhere on your `sandbox.denyRead` list, re-allow that one folder with `sandbox.allowRead`.
 - **"No test proves the change"**: the model's test passes on the old code too, or the change has no test.
 - **"Checks did not run"**: the pull request got no checks on GitHub. The job never merges without them.
 

@@ -11,6 +11,16 @@ const fakeFs = (files) => ({
     if (!Object.hasOwn(files, key)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     return files[key];
   },
+  readdirSync: (path) => {
+    const prefix = path === '/repo' ? '' : `${path.replace('/repo/', '')}/`;
+    const names = new Map();
+    for (const file of Object.keys(files)) {
+      if (!file.startsWith(prefix)) continue;
+      const [first, ...rest] = file.slice(prefix.length).split('/');
+      names.set(first, rest.length > 0);
+    }
+    return [...names].map(([name, isDir]) => ({ name, isDirectory: () => isDir }));
+  },
 });
 const pkg = (scripts) => JSON.stringify({ scripts });
 
@@ -42,10 +52,22 @@ test('parseTestCounts reads the summary of several test runners', () => {
   assert.deepEqual(parseTestCounts('      Tests  7 passed (7)\n'), { ran: 7, passed: 7 });
   assert.deepEqual(parseTestCounts('Executed 12 tests, with 1 failure (0 unexpected) in 0.5 seconds\n'), { ran: 12, passed: 11 });
 });
-test('parseTestCounts uses the last summary when there are several, and null when there is none', () => {
-  assert.deepEqual(parseTestCounts('# tests 3\n# pass 3\nmore\n# tests 12\n# pass 11\n'), { ran: 12, passed: 11 });
+test('parseTestCounts adds up several test runs in one output, and is null when there is none', () => {
+  assert.deepEqual(parseTestCounts('# tests 3\n# pass 3\nmore\n# tests 12\n# pass 11\n'), { ran: 15, passed: 14 });
+  assert.deepEqual(parseTestCounts('      Tests  200 passed | 8 skipped (208)\nbuild\n      Tests  2 passed (2)\n'), { ran: 210, passed: 202 });
+  assert.deepEqual(parseTestCounts('# tests 5\n# pass 5\n      Tests  2 passed (2)\n'), { ran: 7, passed: 7 });
   assert.equal(parseTestCounts('all good, trust me'), null);
   assert.equal(parseTestCounts(''), null);
+});
+
+test('parseTestCounts takes the final total from XCTest, which repeats itself', () => {
+  const output = 'Executed 5 tests, with 0 failures (0 unexpected) in 0.1 seconds\nExecuted 12 tests, with 1 failure (0 unexpected) in 0.5 seconds\n';
+  assert.deepEqual(parseTestCounts(output), { ran: 12, passed: 11 });
+});
+
+test('parseTestCounts reads coloured output', () => {
+  const coloured = '\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m200 passed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[33m8 skipped\u001b[39m\u001b[90m (208)\u001b[39m\n';
+  assert.deepEqual(parseTestCounts(coloured), { ran: 208, passed: 200 });
 });
 
 test('measure runs npm ci, then the check, then the audit, and reads the counts', async () => {
@@ -113,4 +135,37 @@ test('diffMeasures shows a side that could not be read as "not measured"', () =>
     { name: 'Tests run', before: 'not measured', after: 5 },
     { name: 'Tests passed', before: 'not measured', after: 5 },
   ]);
+});
+
+test('dependencies are installed for every package in the repository, not only the root one', async () => {
+  const fs = fakeFs({
+    'package.json': pkg({ ci: 'x' }), 'package-lock.json': '{}',
+    'apps/web/package.json': '{}', 'apps/web/package-lock.json': '{}',
+    'tools/gen/package-lock.json': '{}',
+    'node_modules/dep/package-lock.json': '{}', '.cache/x/package-lock.json': '{}', 'a/b/c/d/package-lock.json': '{}',
+  });
+  const { run, calls } = fakeRun([[() => true, {}]]);
+  const m = await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
+  assert.equal(m.checksPass, true);
+  assert.deepEqual(calls.map((c) => `${c.argv.join(' ')} @ ${c.options.cwd}`), [
+    'npm ci @ /repo', 'npm ci @ /repo/apps/web', 'npm ci @ /repo/tools/gen', 'npm run ci @ /repo', 'npm audit --json @ /repo',
+  ]);
+});
+
+test('an install that fails in a nested package also stops the check', async () => {
+  const fs = fakeFs({ 'package.json': pkg({ test: 'x' }), 'package-lock.json': '{}', 'apps/web/package-lock.json': '{}' });
+  const { run, calls } = fakeRun([
+    [(argv, options) => argv.join(' ') === 'npm ci' && options.cwd === '/repo/apps/web', { code: 1 }],
+    [() => true, {}],
+  ]);
+  const m = await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
+  assert.equal(m.checksPass, false);
+  assert.equal(calls.some((c) => c.argv.join(' ') === 'npm test'), false);
+});
+
+test('a repository with its own ci/run.sh is left to install its own dependencies', async () => {
+  const fs = fakeFs({ 'ci/run.sh': '', 'package.json': pkg({ test: 'x' }), 'package-lock.json': '{}', 'apps/web/package-lock.json': '{}' });
+  const { run, calls } = fakeRun([[() => true, {}]]);
+  await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
+  assert.deepEqual(calls.map((c) => c.argv.join(' ')), ['bash ci/run.sh', 'npm audit --json']);
 });
