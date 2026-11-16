@@ -144,7 +144,15 @@ export async function provesItself({ run, checkRunFor, gitPath, repoDir, proofDi
 
 const DOCS = /(\.(md|mdx|txt|rst|adoc)$|^docs\/|(^|\/)(LICENSE|NOTICE|AUTHORS|CHANGELOG)[^/]*$)/i;
 const DEP_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
-const PLAIN_VERSION = /^[\^~]?(\d+)\.(\d+)\.\d+$/;
+const PLAIN_VERSION = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/;
+
+// A step forward that stays inside the same major version (and, before 1.0, the same minor).
+function smallStepUp(from, to) {
+  if (!from || !to) return false;
+  const [a, b] = [from, to].map((match) => match.slice(1, 4).map(Number));
+  if (a[0] !== b[0] || (b[0] === 0 && a[1] !== b[1])) return false;
+  return b[1] > a[1] || (b[1] === a[1] && b[2] > a[2]);
+}
 
 function parse(text) {
   try {
@@ -167,16 +175,19 @@ function onlyBumps(before, after) {
     if (JSON.stringify(Object.keys(was).sort()) !== JSON.stringify(Object.keys(is).sort())) return false;
     for (const name of Object.keys(is)) {
       if (was[name] === is[name]) continue;
-      const from = PLAIN_VERSION.exec(String(was[name]));
-      const to = PLAIN_VERSION.exec(String(is[name]));
-      if (!from || !to || from[1] !== to[1]) return false;
-      if (to[1] === '0' && from[2] !== to[2]) return false;
+      if (!smallStepUp(PLAIN_VERSION.exec(String(was[name])), PLAIN_VERSION.exec(String(is[name])))) return false;
     }
   }
   return true;
 }
 
-const LOCKED_VERSION = /^(\d+)\.(\d+)\.\d+$/;
+const LOCKED_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+// What may differ in a lockfile entry when its package moves to a new version: where it
+// comes from, and what the package says about itself. Nothing that changes how it installs.
+const MAY_CHANGE_WITH_VERSION = new Set([
+  'version', 'resolved', 'integrity', 'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'optionalDependencies',
+  'engines', 'license', 'funding', 'deprecated',
+]);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // The package a lockfile entry installs, from its path, or null for anything that is not
@@ -188,7 +199,8 @@ function lockedName(key) {
 
 // A package-lock.json differs only by small version bumps of packages it already listed,
 // each still downloaded from the public registry under its own name and version.
-function lockOnlyBumps(before, after) {
+// `rootMayChange` is true when the package.json beside it is part of the same change.
+function lockOnlyBumps(before, after, rootMayChange) {
   if (!before || !after || typeof before.packages !== 'object' || typeof after.packages !== 'object') return false;
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (key !== 'packages' && !same(before[key], after[key])) return false;
@@ -196,16 +208,19 @@ function lockOnlyBumps(before, after) {
   if (!same(Object.keys(before.packages).sort(), Object.keys(after.packages).sort())) return false;
   for (const [key, is] of Object.entries(after.packages)) {
     const was = before.packages[key];
+    if (same(was, is)) continue;
     // The root entry mirrors package.json, which is checked on its own.
-    if (key === '' || same(was, is)) continue;
+    if (key === '') {
+      if (rootMayChange) continue;
+      return false;
+    }
     const name = lockedName(key);
-    const from = LOCKED_VERSION.exec(String(was?.version));
-    const to = LOCKED_VERSION.exec(String(is?.version));
-    if (!name || !from || !to || from[1] !== to[1] || (to[1] === '0' && from[2] !== to[2])) return false;
+    if (!name || !smallStepUp(LOCKED_VERSION.exec(String(was?.version)), LOCKED_VERSION.exec(String(is?.version)))) return false;
+    for (const field of new Set([...Object.keys(was), ...Object.keys(is)])) {
+      if (!MAY_CHANGE_WITH_VERSION.has(field) && !same(was[field], is[field])) return false;
+    }
     if (is.resolved !== `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${is.version}.tgz`) return false;
-    if (typeof is.integrity !== 'string' || !/^sha\d+-/.test(is.integrity)) return false;
-    if (is.hasInstallScript && !was.hasInstallScript) return false;
-    if (is.link || was.link) return false;
+    if (typeof is.integrity !== 'string' || !is.integrity.startsWith('sha512-')) return false;
   }
   return true;
 }
@@ -215,7 +230,10 @@ function isDependencyPatch(files, manifests) {
     const entry = manifests[path];
     if (!entry || entry.before == null || entry.after == null) return false;
     if (baseName(path) === 'package.json') return onlyBumps(parse(entry.before), parse(entry.after));
-    if (baseName(path) === 'package-lock.json') return lockOnlyBumps(parse(entry.before), parse(entry.after));
+    if (baseName(path) === 'package-lock.json') {
+      const beside = `${path.slice(0, -'package-lock.json'.length)}package.json`;
+      return lockOnlyBumps(parse(entry.before), parse(entry.after), files.includes(beside));
+    }
     return false;
   });
 }

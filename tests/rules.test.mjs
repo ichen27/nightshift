@@ -324,3 +324,44 @@ test('readManifests returns the before and after text of changed package files o
   assert.match(manifests['package.json'].after, /"test":"true"/);
   assert.deepEqual(manifests['web/package-lock.json'], { before: null, after: '{"lockfileVersion":3}' });
 });
+
+test('a dependency patch may not move a version backwards', () => {
+  const down = patch({ ...rootPkg, dependencies: { a: '^0.9.0' } });
+  assert.equal(verdict(down).merge, false);
+  const before = lockOf({ 'node_modules/a': entry('a', '1.0.4') });
+  const after = lockOf({ 'node_modules/a': entry('a', '1.0.0') });
+  const lockDown = patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before, after } } });
+  assert.deepEqual(verdict(lockDown), NO_PROOF);
+  const samePkg = patch({ ...rootPkg, dependencies: { a: '^1.0.0' }, devDependencies: { b: '~0.4.1' } });
+  assert.equal(verdict(samePkg).merge, false, 'a lower patch version is still a step backwards');
+});
+
+test('a changed lockfile entry may differ only in its version, address, hash and what the package itself declares', () => {
+  const before = lockOf({ 'node_modules/a': entry('a', '1.0.0', { dependencies: { c: '^1.0.0' }, engines: { node: '>=18' } }) });
+  const withLock = (after) => patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before, after } } });
+  const fine = lockOf({ 'node_modules/a': entry('a', '1.0.4', { dependencies: { c: '^1.1.0' }, engines: { node: '>=20' }, license: 'MIT' }) });
+  assert.equal(verdict(withLock(fine)).merge, true);
+  const cases = {
+    'adds a command': { bin: { a: 'cli.js' } },
+    'marks it optional': { optional: true },
+    'limits the platform': { os: ['darwin'] },
+    'bundles something': { inBundle: true },
+    'adds an unknown field': { surprise: 1 },
+    'uses a weak hash': { integrity: 'sha1-abc' },
+  };
+  for (const [name, extra] of Object.entries(cases)) {
+    const after = lockOf({ 'node_modules/a': entry('a', '1.0.4', { dependencies: { c: '^1.0.0' }, engines: { node: '>=18' }, ...extra }) });
+    assert.deepEqual(verdict(withLock(after)), NO_PROOF, name);
+  }
+});
+
+test('the lockfile\'s own root entry may change only together with its package.json', () => {
+  const before = JSON.stringify({ name: 'app', lockfileVersion: 3, packages: { '': { name: 'app', dependencies: { a: '^1.0.0' } }, 'node_modules/a': entry('a', '1.0.0') } });
+  const after = JSON.stringify({ name: 'app', lockfileVersion: 3, packages: { '': { name: 'app', dependencies: { a: '^1.0.4' } }, 'node_modules/a': entry('a', '1.0.4') } });
+  const lockOnly = patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before, after } } });
+  assert.deepEqual(verdict(lockOnly), NO_PROOF);
+  const both = patch({ ...rootPkg, dependencies: { a: '^1.0.4' } }, { manifests: { ...manifestsOf({ ...rootPkg, dependencies: { a: '^1.0.4' } }), 'package-lock.json': { before, after } } });
+  assert.equal(verdict(both).merge, true);
+  const nested = patch(rootPkg, { stats: stats(['web/package-lock.json']), manifests: { ...manifestsOf({ ...rootPkg, dependencies: { a: '^1.0.4' } }), 'web/package-lock.json': { before, after } } });
+  assert.deepEqual(verdict(nested), NO_PROOF, 'the package.json beside the lockfile is the one that counts');
+});
