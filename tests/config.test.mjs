@@ -60,3 +60,9 @@ test('allowed hosts are loopback on the port, plus NIGHTSHIFT_ALLOWED_HOSTS', ()
   const c = loadConfig({ APP_DATA_DIR: '/b', PORT: '9001', NIGHTSHIFT_ALLOWED_HOSTS: ' App.Example.com, other.example.com ,' });
   assert.deepEqual(c.allowedHosts, ['127.0.0.1:9001', 'localhost:9001', 'app.example.com', 'other.example.com']);
 });
+
+test('the sandbox is required by default and its lists start empty', () => {
+  assert.equal(DEFAULT_SETTINGS.allowUnsandboxed, false);
+  assert.deepEqual(DEFAULT_SETTINGS.sandbox, { allowWrite: [], allowRead: [], denyRead: [] });
+  assert.equal(DEFAULT_SETTINGS.identity, null);
+});
