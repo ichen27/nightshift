@@ -28,7 +28,9 @@ function quote(path) {
 }
 
 // A Seatbelt profile. Later rules win, so the readable list is applied after the denied one.
-export function sandboxProfile({ writable, denyRead, readable }) {
+// Outbound network is closed except loopback (a project's own tests, and the job's proxy)
+// and sockets inside the given folders.
+export function sandboxProfile({ writable, denyRead, readable, sockets = writable }) {
   const lines = [
     '(version 1)',
     '(allow default)',
@@ -37,11 +39,13 @@ export function sandboxProfile({ writable, denyRead, readable }) {
   ];
   if (denyRead.length) lines.push(`(deny file-read-data ${denyRead.map(quote).join(' ')})`);
   if (readable.length) lines.push(`(allow file-read-data ${readable.map(quote).join(' ')})`);
+  lines.push('(deny network-outbound)', '(allow network-outbound (remote ip "localhost:*"))');
+  if (sockets.length) lines.push(`(allow network-outbound ${sockets.map(quote).join(' ')})`);
   return `${lines.join('\n')}\n`;
 }
 
 // Only what a build needs, with every route to stored credentials pointed at nothing.
-export function restrictedEnv(env, { emptyDir, cacheDir, extra = {} }) {
+export function restrictedEnv(env, { emptyDir, cacheDir, proxyUrl = null, extra = {} }) {
   const out = {};
   for (const key of KEEP_ENV) {
     if (env[key] !== undefined) out[key] = env[key];
@@ -57,6 +61,12 @@ export function restrictedEnv(env, { emptyDir, cacheDir, extra = {} }) {
     GIT_TERMINAL_PROMPT: '0',
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
+    ...(proxyUrl
+      ? {
+          HTTPS_PROXY: proxyUrl, HTTP_PROXY: proxyUrl, https_proxy: proxyUrl, http_proxy: proxyUrl,
+          NO_PROXY: 'localhost,127.0.0.1,::1', NODE_USE_ENV_PROXY: '1',
+        }
+      : {}),
     ...extra,
   };
 }
@@ -72,7 +82,7 @@ const real = (path) => {
 // Returns a function with the same result shape as exec's run(). Each call names the
 // folders it may write to and a private cache folder.
 export function createRestrictedRun({
-  run, sandbox, home, dataDir, emptyDir, env, settings,
+  run, sandbox, home, dataDir, emptyDir, env, settings, proxyUrl = null,
   ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
 }) {
   const custom = settings?.sandbox ?? {};
@@ -80,13 +90,15 @@ export function createRestrictedRun({
     for (const dir of [emptyDir, cacheDir, join(cacheDir, 'tmp'), join(cacheDir, 'npm'), join(cacheDir, 'xdg'), ...writable]) {
       ensureDir(dir);
     }
-    const runEnv = restrictedEnv(env, { emptyDir: real(emptyDir), cacheDir: real(cacheDir), extra: extraEnv });
+    const runEnv = restrictedEnv(env, { emptyDir: real(emptyDir), cacheDir: real(cacheDir), proxyUrl, extra: extraEnv });
     if (!sandbox) return run(argv, { cwd, timeoutMs, env: runEnv });
     const canWrite = [...writable, cacheDir, ...TEMP_DIRS, ...(custom.allowWrite ?? [])].map(real);
     const profile = sandboxProfile({
       writable: canWrite,
       denyRead: [dataDir, ...PRIVATE_HOME_PATHS.map((path) => join(home, path)), ...(custom.denyRead ?? [])].map(real),
       readable: [...writable, cacheDir, emptyDir, ...(custom.allowRead ?? [])].map(real),
+      // Not the shared temporary folders: other programs keep their own sockets there.
+      sockets: [...writable, cacheDir].map(real),
     });
     return run([SANDBOX_EXEC, '-p', profile, ...argv], { cwd, timeoutMs, env: runEnv });
   };

@@ -1,5 +1,5 @@
 // Builds and runs the headless Claude Code call that inspects one project.
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 
 const BRIEF = readFileSync(new URL('../prompts/brief.md', import.meta.url), 'utf8');
 const TITLE_MAX = 160;
@@ -67,9 +67,11 @@ export function renderBrief({ project, mayChange, isPublic, knownFindings }) {
   return BRIEF.replace(/\{(project|knownFindings|changeRule)\}/g, (_match, key) => fill[key]);
 }
 
-// `claudeDir` is a folder of the model's own for its sign-in and state, so it never reads
-// or writes the user's everyday Claude Code settings.
+// The run signs in with a long-lived token (from `claude setup-token`) and keeps its files
+// in `claudeDir`, a folder that is emptied around every run. It never reads or writes the
+// user's everyday Claude Code settings, and nothing it writes there reaches a later run.
 export function buildAgentCall({ claudePath, brief, claudeDir, token }) {
+  if (!token) throw new Error('A Claude sign-in token is required.');
   return {
     argv: [
       claudePath, '-p', brief,
@@ -81,7 +83,12 @@ export function buildAgentCall({ claudePath, brief, claudeDir, token }) {
       '--no-session-persistence',
       '--disallowedTools', 'Bash(gh *)', 'Bash(git push *)', 'Bash(git remote *)', 'WebFetch', 'WebSearch',
     ],
-    env: { CLAUDE_CONFIG_DIR: claudeDir, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) },
+    env: {
+      CLAUDE_CONFIG_DIR: claudeDir,
+      CLAUDE_CODE_OAUTH_TOKEN: token,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      DISABLE_AUTOUPDATER: '1',
+    },
   };
 }
 
@@ -129,8 +136,20 @@ function errorReason(text) {
 
 const failed = (failure, model = null) => ({ ok: false, output: null, model, failure });
 
-export async function runAgent({ restrictedRun, call, cwd, cacheDir, claudeDir, timeoutMs }) {
-  const result = await restrictedRun(call.argv, { cwd, timeoutMs, writable: [cwd, claudeDir], cacheDir, env: call.env });
+function emptyDir(dir) {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+}
+
+// `claudeDir` must be inside `cacheDir`, which the sandbox already lets the run write to.
+export async function runAgent({ restrictedRun, call, cwd, cacheDir, claudeDir, timeoutMs, resetDir = emptyDir }) {
+  resetDir(claudeDir);
+  let result;
+  try {
+    result = await restrictedRun(call.argv, { cwd, timeoutMs, writable: [cwd], cacheDir, env: call.env });
+  } finally {
+    resetDir(claudeDir);
+  }
   if (result.timedOut) return failed('The model ran out of time.');
 
   let reply = null;

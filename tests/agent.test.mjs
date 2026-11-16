@@ -6,7 +6,7 @@ import { AGENT_SCHEMA, buildAgentCall, renderBrief, runAgent } from '../src/agen
 // Hand-written from the documented result shape; to be replaced by a recorded reply
 // once the command-line tool can be probed.
 const fixture = () => JSON.parse(readFileSync(new URL('./fixtures/claude-output.json', import.meta.url), 'utf8'));
-const call = () => buildAgentCall({ claudePath: '/bin/claude', brief: 'the brief', claudeDir: '/data/claude' });
+const call = () => buildAgentCall({ claudePath: '/bin/claude', brief: 'the brief', claudeDir: '/data/ws/cache/claude', token: 'tok' });
 
 test('the argv runs Claude headless with structured output and its restrictions', () => {
   const { argv } = call();
@@ -24,10 +24,14 @@ test('no model is named, so the run follows the tool\'s default', () => {
   assert.equal(call().argv.includes('--model'), false);
 });
 
-test('the call keeps Claude\'s own files in a folder of its own', () => {
-  assert.deepEqual(call().env, { CLAUDE_CONFIG_DIR: '/data/claude' });
-  assert.deepEqual(buildAgentCall({ claudePath: 'claude', brief: 'b', claudeDir: '/c', token: 'tok' }).env,
-    { CLAUDE_CONFIG_DIR: '/c', CLAUDE_CODE_OAUTH_TOKEN: 'tok' });
+test('the call signs in with a token and keeps Claude\'s files in a folder of its own, with extra traffic off', () => {
+  assert.deepEqual(call().env, {
+    CLAUDE_CONFIG_DIR: '/data/ws/cache/claude',
+    CLAUDE_CODE_OAUTH_TOKEN: 'tok',
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    DISABLE_AUTOUPDATER: '1',
+  });
+  assert.throws(() => buildAgentCall({ claudePath: 'claude', brief: 'b', claudeDir: '/c' }), /token/);
 });
 
 test('the schema requires findings, change and proposals', () => {
@@ -41,21 +45,22 @@ const runWith = (result, extra = {}) => {
     calls.push({ argv, options });
     return { code: 0, stdout: '', stderr: '', timedOut: false, ...result };
   };
-  return runAgent({ restrictedRun, call: call(), cwd: '/data/ws/tree', cacheDir: '/data/ws/cache', claudeDir: '/data/claude', timeoutMs: 1800000, ...extra })
-    .then((outcome) => ({ outcome, calls }));
+  const reset = [];
+  return runAgent({ restrictedRun, call: call(), cwd: '/data/ws/tree', cacheDir: '/data/ws/cache', claudeDir: '/data/ws/cache/claude', timeoutMs: 1800000, resetDir: (dir) => reset.push(dir), ...extra })
+    .then((outcome) => ({ outcome, calls, reset }));
 };
 
 test('a good reply parses to ok with the output and the model that did the work', async () => {
-  const { outcome, calls } = await runWith({ stdout: JSON.stringify(fixture()) });
+  const { outcome, calls, reset } = await runWith({ stdout: JSON.stringify(fixture()) });
   assert.equal(outcome.ok, true);
   assert.equal(outcome.failure, null);
   assert.equal(outcome.model, 'example-model');
   assert.equal(outcome.output.change.title, 'Reject empty names when saving a profile');
   assert.equal(outcome.output.findings.length, 1);
   assert.deepEqual(calls[0].options, {
-    cwd: '/data/ws/tree', timeoutMs: 1800000, writable: ['/data/ws/tree', '/data/claude'], cacheDir: '/data/ws/cache',
-    env: { CLAUDE_CONFIG_DIR: '/data/claude' },
+    cwd: '/data/ws/tree', timeoutMs: 1800000, writable: ['/data/ws/tree'], cacheDir: '/data/ws/cache', env: call().env,
   });
+  assert.deepEqual(reset, ['/data/ws/cache/claude', '/data/ws/cache/claude'], 'the config folder is emptied before and after the run');
 });
 
 test('a reply with no change is ok', async () => {
