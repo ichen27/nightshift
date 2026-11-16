@@ -4,6 +4,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   projectsPerNight: 3,
   hold: [],
   adminMerge: [],
+  // { name, email } used to author every commit the job makes. Required for a run.
+  identity: null,
   vaultDir: null,
   launcherDir: null,
   launcherRegistry: null,
