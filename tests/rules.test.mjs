@@ -59,10 +59,14 @@ test('before 1.0 a minor bump counts as major; other cases do not', () => {
 });
 
 const rootPkg = { name: 'app', scripts: { test: 'node --test' }, dependencies: { a: '^1.0.0' }, devDependencies: { b: '~0.4.2' } };
-const lock = (hosts = ['https://registry.npmjs.org']) =>
-  JSON.stringify({ packages: Object.fromEntries(hosts.map((host, i) => [`node_modules/p${i}`, { resolved: `${host}/p${i}/-/p${i}-1.0.0.tgz` }])) });
+const entry = (name, version, extra = {}) => ({
+  version, resolved: `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${version}.tgz`, integrity: 'sha512-abc', ...extra,
+});
+const lockOf = (packages, top = {}) => JSON.stringify({ name: 'app', lockfileVersion: 3, packages: { '': { name: 'app' }, ...packages }, ...top });
+const baseLock = lockOf({ 'node_modules/a': entry('a', '1.0.0'), 'node_modules/@s/b': entry('@s/b', '0.4.2'), 'packages/local': { link: true } });
+const bumpedLock = lockOf({ 'node_modules/a': entry('a', '1.0.4'), 'node_modules/@s/b': entry('@s/b', '0.4.9'), 'packages/local': { link: true } });
 const manifestsOf = (after, before = rootPkg) => ({ 'package.json': { before: JSON.stringify(before), after: JSON.stringify(after) } });
-const stats = (files, over = {}) => ({ files, addedLines: 12, onlyRemovals: false, modifiedFiles: [], ...over });
+const stats = (files, over = {}) => ({ files, addedLines: 12, onlyRemovals: false, ...over });
 const good = {
   change: { kind: 'fix', majorUpgrade: false },
   stats: stats(['src/profile.js', 'tests/profile.test.js']),
@@ -105,24 +109,23 @@ test('a major upgrade is proposed, whether the model says so or the versions do'
 test('a fix without proof is proposed', () => {
   assert.deepEqual(verdict({ proof: { proven: false, note: 'The new test passes without the change.' } }), NO_PROOF);
 });
-test('checks that failed before and pass now count as proof, unless existing tests were edited', () => {
+test('checks that were already failing do not stand in for a test', () => {
   const fixed = { before: { checksPass: false, tests: null }, proof: { proven: false, note: 'The checks were already failing before the change.' } };
-  assert.equal(verdict({ ...fixed, stats: stats(['src/profile.js']) }).merge, true);
-  assert.deepEqual(verdict({ ...fixed, stats: stats(['src/profile.js', 'tests/old.test.js'], { modifiedFiles: ['tests/old.test.js'] }) }), NO_PROOF);
+  assert.deepEqual(verdict({ ...fixed, stats: stats(['src/profile.js']) }), NO_PROOF);
 });
 
 const patch = (afterPkg, extra = {}) => ({
   change: { kind: 'dependency-patch', majorUpgrade: false },
   stats: stats(['package.json', 'package-lock.json']),
   proof: unproven,
-  manifests: { ...manifestsOf(afterPkg), 'package-lock.json': { before: lock(), after: lock() } },
+  manifests: { ...manifestsOf(afterPkg), 'package-lock.json': { before: baseLock, after: bumpedLock } },
   ...extra,
 });
 test('a dependency patch without a test merges when checks pass', () => {
   assert.deepEqual(verdict(patch({ ...rootPkg, dependencies: { a: '^1.0.4' }, devDependencies: { b: '~0.4.9' } })), { merge: true, reason: null });
 });
 test('a lockfile-only patch merges', () => {
-  const only = patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before: lock(), after: lock() } } });
+  const only = patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before: baseLock, after: bumpedLock } } });
   assert.equal(verdict(only).merge, true);
 });
 test('a dependency patch that does anything else needs a test like any other change', () => {
@@ -141,11 +144,38 @@ test('a dependency patch that does anything else needs a test like any other cha
     assert.equal(result.merge, false, name);
   }
 });
-test('a dependency patch whose lockfile fetches from a new host needs a test', () => {
-  const manifests = { ...manifestsOf({ ...rootPkg, dependencies: { a: '^1.0.4' } }), 'package-lock.json': { before: lock(), after: lock(['https://registry.npmjs.org', 'https://evil.example.net']) } };
-  assert.deepEqual(verdict(patch(rootPkg, { manifests })), NO_PROOF);
-  const gitDep = JSON.stringify({ packages: { 'node_modules/p': { resolved: 'git+ssh://git@github.com/someone/p.git#abc' } } });
-  assert.deepEqual(verdict(patch(rootPkg, { manifests: { ...manifests, 'package-lock.json': { before: lock(), after: gitDep } } })), NO_PROOF);
+test('a dependency patch whose lockfile does more than bump what was there needs a test', () => {
+  const a = (extra, version = '1.0.4') => ({ 'node_modules/a': entry('a', version, extra), 'node_modules/@s/b': entry('@s/b', '0.4.2'), 'packages/local': { link: true } });
+  const cases = {
+    'adds a package': lockOf({ ...a({}), 'node_modules/evil': entry('evil', '1.0.0') }),
+    'removes a package': lockOf({ 'node_modules/a': entry('a', '1.0.4') }),
+    'jumps a major version': lockOf(a({}, '2.0.0')),
+    'jumps a minor version before 1.0': lockOf({ ...a({}), 'node_modules/@s/b': entry('@s/b', '0.5.0') }),
+    'downloads from another host': lockOf(a({ resolved: 'https://evil.example.net/a/-/a-1.0.4.tgz' })),
+    'downloads another package under this name': lockOf(a({ resolved: 'https://registry.npmjs.org/evil/-/evil-1.0.4.tgz' })),
+    'downloads another version than it says': lockOf(a({ resolved: 'https://registry.npmjs.org/a/-/a-9.9.9.tgz' })),
+    'downloads from a repository': lockOf(a({ resolved: 'git+ssh://git@github.com/someone/a.git#abc' })),
+    'has no download address': lockOf(a({ resolved: undefined })),
+    'has no integrity hash': lockOf(a({ integrity: undefined })),
+    'gains an install script': lockOf(a({ hasInstallScript: true })),
+    'turns a local link into something else': lockOf({ ...a({}), 'packages/local': { link: true, resolved: 'https://evil.example.net/x.tgz' } }),
+    'is in the old lockfile format': JSON.stringify({ lockfileVersion: 1, dependencies: { a: entry('a', '1.0.4') } }),
+    'is not JSON': '{ broken',
+    'changes something outside packages': lockOf(a({}), { extra: 'field' }),
+  };
+  for (const [name, after] of Object.entries(cases)) {
+    const manifests = { ...manifestsOf({ ...rootPkg, dependencies: { a: '^1.0.4' } }), 'package-lock.json': { before: baseLock, after } };
+    assert.deepEqual(verdict(patch(rootPkg, { manifests })), NO_PROOF, name);
+  }
+});
+test('a scoped package is checked against its own registry address', () => {
+  const after = lockOf({ 'node_modules/a': entry('a', '1.0.0'), 'node_modules/@s/b': entry('@s/b', '0.4.9'), 'packages/local': { link: true } });
+  const manifests = { 'package-lock.json': { before: baseLock, after } };
+  assert.equal(verdict(patch(rootPkg, { stats: stats(['package-lock.json']), manifests })).merge, true);
+  const nested = lockOf({ 'node_modules/a': entry('a', '1.0.0'), 'node_modules/@s/b': entry('@s/b', '0.4.2'), 'packages/local': { link: true }, 'node_modules/x/node_modules/a': entry('a', '1.0.0') });
+  const nestedBumped = nested.replace('"node_modules/x/node_modules/a":{"version":"1.0.0","resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz"', '"node_modules/x/node_modules/a":{"version":"1.0.1","resolved":"https://registry.npmjs.org/a/-/a-1.0.1.tgz"');
+  assert.notEqual(nested, nestedBumped);
+  assert.equal(verdict(patch(rootPkg, { stats: stats(['package-lock.json']), manifests: { 'package-lock.json': { before: nested, after: nestedBumped } } })).merge, true);
 });
 test('a dependency patch touching any other file, another lock format, or a manifest that cannot be read needs a test', () => {
   const base = patch({ ...rootPkg, dependencies: { a: '^1.0.4' } });
@@ -207,9 +237,9 @@ const prove = (r, files) => provesItself({
 test('changeStats lists the changed files and counts added lines', async () => {
   const r = await repoWith({ testPassesOnBase: false });
   assert.deepEqual(await changeStats({ run, gitPath: 'git', repoDir: r.repo, baseSha: r.baseSha, sha: r.sha }),
-    { files: ['tests/value.test.mjs', 'value.mjs'], addedLines: 5, onlyRemovals: false, modifiedFiles: ['value.mjs'] });
+    { files: ['tests/value.test.mjs', 'value.mjs'], addedLines: 5, onlyRemovals: false });
   assert.deepEqual(await changeStats({ run, gitPath: 'git', repoDir: r.repo, baseSha: r.baseSha, sha: r.baseSha }),
-    { files: [], addedLines: 0, onlyRemovals: false, modifiedFiles: [] });
+    { files: [], addedLines: 0, onlyRemovals: false });
 });
 
 test('changeStats says a change only removes when it deletes lines or files and nothing else', async () => {

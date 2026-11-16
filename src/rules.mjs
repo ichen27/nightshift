@@ -14,9 +14,9 @@ async function git(run, gitPath, cwd, args, { allowFailure = false } = {}) {
   return result;
 }
 
-// What a change touches: its files (a rename counts as both names), the files it modified
-// rather than added or deleted, how many lines it adds, and whether it does nothing but
-// remove (no added lines, no new files, no binary changes, no permission changes).
+// What a change touches: its files (a rename counts as both names), how many lines it adds,
+// and whether it does nothing but remove (no added lines, no new files, no binary changes,
+// no permission changes).
 export async function changeStats({ run, gitPath, repoDir, baseSha, sha }) {
   const range = ['--no-renames', baseSha, sha];
   const numstat = await git(run, gitPath, repoDir, ['diff', '--numstat', '-z', ...range]);
@@ -30,13 +30,11 @@ export async function changeStats({ run, gitPath, repoDir, baseSha, sha }) {
     else binary = true;
   }
   const summary = await git(run, gitPath, repoDir, ['diff', '--summary', ...range]);
-  const modified = await git(run, gitPath, repoDir, ['diff', '--name-only', '--diff-filter=M', '-z', ...range]);
   const reshaped = /^ (create mode|mode change) /m.test(summary.stdout);
   return {
     files,
     addedLines,
     onlyRemovals: files.length > 0 && addedLines === 0 && !binary && !reshaped,
-    modifiedFiles: modified.stdout.split('\0').filter(Boolean),
   };
 }
 
@@ -163,18 +161,38 @@ function onlyBumps(before, after) {
   return true;
 }
 
-// Where a lockfile downloads from. Anything that is not an https address counts as its own source.
-function sources(lockText) {
-  const found = new Set();
-  for (const [, address] of String(lockText ?? '').matchAll(/"resolved"\s*:\s*"([^"]*)"/g)) {
-    try {
-      const url = new URL(address);
-      found.add(url.protocol === 'https:' ? url.host : address);
-    } catch {
-      found.add(address);
-    }
+const LOCKED_VERSION = /^(\d+)\.(\d+)\.\d+$/;
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// The package a lockfile entry installs, from its path, or null for anything that is not
+// an installed package (a workspace link, for example).
+function lockedName(key) {
+  const at = key.lastIndexOf('node_modules/');
+  return at === -1 ? null : key.slice(at + 'node_modules/'.length);
+}
+
+// A package-lock.json differs only by small version bumps of packages it already listed,
+// each still downloaded from the public registry under its own name and version.
+function lockOnlyBumps(before, after) {
+  if (!before || !after || typeof before.packages !== 'object' || typeof after.packages !== 'object') return false;
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (key !== 'packages' && !same(before[key], after[key])) return false;
   }
-  return found;
+  if (!same(Object.keys(before.packages).sort(), Object.keys(after.packages).sort())) return false;
+  for (const [key, is] of Object.entries(after.packages)) {
+    const was = before.packages[key];
+    // The root entry mirrors package.json, which is checked on its own.
+    if (key === '' || same(was, is)) continue;
+    const name = lockedName(key);
+    const from = LOCKED_VERSION.exec(String(was?.version));
+    const to = LOCKED_VERSION.exec(String(is?.version));
+    if (!name || !from || !to || from[1] !== to[1] || (to[1] === '0' && from[2] !== to[2])) return false;
+    if (is.resolved !== `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${is.version}.tgz`) return false;
+    if (typeof is.integrity !== 'string' || !/^sha\d+-/.test(is.integrity)) return false;
+    if (is.hasInstallScript && !was.hasInstallScript) return false;
+    if (is.link || was.link) return false;
+  }
+  return true;
 }
 
 function isDependencyPatch(files, manifests) {
@@ -182,10 +200,7 @@ function isDependencyPatch(files, manifests) {
     const entry = manifests[path];
     if (!entry || entry.before == null || entry.after == null) return false;
     if (baseName(path) === 'package.json') return onlyBumps(parse(entry.before), parse(entry.after));
-    if (baseName(path) === 'package-lock.json') {
-      const allowed = sources(entry.before);
-      return parse(entry.after) !== null && [...sources(entry.after)].every((source) => allowed.has(source));
-    }
+    if (baseName(path) === 'package-lock.json') return lockOnlyBumps(parse(entry.before), parse(entry.after));
     return false;
   });
 }
@@ -217,10 +232,7 @@ export function decide({ change, stats, before, after, proof, manifests = {} }) 
   const packages = packageFiles(manifests);
   if (packages.some((pkg) => !sameScripts(pkg.before, pkg.after))) return propose('Changes how the checks run');
   if (change.majorUpgrade || packages.some((pkg) => isMajorUpgrade(pkg.before, pkg.after))) return propose('Major version upgrade');
-  // Checks that failed before and pass now show the change works, as long as it did not
-  // get there by editing the tests that were failing.
-  const checksProveIt = before?.checksPass === false && !stats.modifiedFiles.some(isTestFile);
   const needsProof = change.kind === 'fix' || !fitsKind(change.kind, stats, manifests);
-  if (needsProof && !proof.proven && !checksProveIt) return propose('No test proves the change');
+  if (needsProof && !proof.proven) return propose('No test proves the change');
   return { merge: true, reason: null };
 }
