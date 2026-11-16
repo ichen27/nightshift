@@ -20,6 +20,7 @@ Lives in the data folder. Every key is optional except `identity`, which a run n
 | `sandbox.allowRead` | Folders to re-allow inside a denied area. | `[]` |
 | `sandbox.denyRead` | Extra folders sandboxed commands may not read. Add anywhere secrets or other projects live. | `[]` |
 | `sandbox.allowHosts` | Extra internet hosts sandboxed commands may reach. `*.example.com` matches subdomains. | `[]` |
+| `sandbox.allowPorts` | Local ports below 49152 that sandboxed commands may connect to, for tests that need a service on a fixed port (a database, say). Anything listed is reachable by the model too. | `[]` |
 | `allowUnsandboxed` | Run without the OS sandbox on a platform that has none. The model is then limited only by its environment. | `false` |
 
 Without `launcherDir` and `launcherRegistry`, merged changes are reported as merged and nothing is restarted.
@@ -77,6 +78,7 @@ Look at the report's reason. Common causes:
 
 - **"The repository's checks do not pass with the change"** on every visit, with a note that the checks are failing: the checks fail inside the sandbox before any change. Run them the same way to see why. If they need to write somewhere else, add it to `sandbox.allowWrite`. If an install needs another host, the log names it; add it to `sandbox.allowHosts`. Browser tests that start their own sandbox cannot run inside this one.
 - The same note, and the project pins a tool version you do not have first on `PATH` (a `package.json` `engines` range, for example): point `toolPaths` at the right one.
+- Tests that connect to a local service on a fixed port (`ECONNREFUSED` or a timeout on `127.0.0.1:5432`, for example) need that port in `sandbox.allowPorts`. Ports the system picks for a test's own server already work.
 - Tests that drive a browser need to read the browser's files. If they live somewhere on your `sandbox.denyRead` list, re-allow that one folder with `sandbox.allowRead`.
 - **"No test proves the change"**: the model's test passes on the old code too, or the change has no test.
 - **"Checks did not run"**: the pull request got no checks on GitHub. The job never merges without them.

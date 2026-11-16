@@ -6,8 +6,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   adminMerge: [],
   // { name, email } used to author every commit the job makes. Required for a run.
   identity: null,
-  // Extra folders, and extra internet hosts, for the sandbox the model and the checks run in.
-  sandbox: { allowWrite: [], allowRead: [], denyRead: [], allowHosts: [] },
+  // Extra folders, internet hosts and local ports for the sandbox the model and the checks run in.
+  sandbox: { allowWrite: [], allowRead: [], denyRead: [], allowHosts: [], allowPorts: [] },
   // Per project ("owner/repo"), folders to put first on PATH for its checks and the model:
   // { "owner/repo": ["/path/to/node22/bin"] }.
   toolPaths: {},

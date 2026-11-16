@@ -38,15 +38,18 @@ The model runs **without permission prompts**, because nobody is awake to answer
 - **It has no route to GitHub.** It works in a throwaway clone with no remotes. The job's own clone, which does all pushing and merging, is a separate folder the model cannot write to. Nothing in the model's `.git` folder is ever used by the job.
 - **An OS sandbox** (macOS `sandbox-exec`) around the model and around every check run on code it touched. Inside it: writes only to the project's own working folders; no reading of credential folders (`~/.ssh`, `~/.config/gh`, `~/.aws`, keychains and others), your documents, or Nightshift's data folder; an environment with no tokens in it.
 - **No direct internet.** The sandbox's only way out is a proxy the job runs, which connects to an allow-list of hosts (by default the Anthropic API and the npm registry) and records what it refused.
+- **Local services are out of reach.** Inside the sandbox, loopback is open only on the port range the system hands out automatically, which is what a project's own test servers use. Services you run on ordinary ports (a database, another app, this app) cannot be reached unless you list the port.
+- **No asking other programs for help.** Launching apps, scripting other apps, creating background jobs, and reaching the keychain or the clipboard are blocked.
 - **The merge rules above**, applied by code the model cannot influence.
 
 What this does **not** cover, stated plainly:
 
-- **Loopback is open inside the sandbox**, so a project's own tests can start a local server. That also means sandboxed code can call any service listening on `127.0.0.1` on the same machine. Do not run unauthenticated services on loopback that you would not want it to reach.
+- A local service that itself listens on a port in the automatic range (49152 and up) can still be reached from the sandbox.
+- The sandbox starts from "allow" and blocks the routes out that are known. It is not a virtual machine. A route nobody thought of is possible.
 - The model can read its own Claude token. With the network allow-list this is hard to misuse, not impossible.
 - An allow-listed host that accepts uploads is still a way to send data out.
 - `sandbox-exec` is deprecated by Apple, though present on current macOS. Other platforms have no sandbox here; the job refuses to run there unless you set `allowUnsandboxed`.
-- Checks that cannot run inside the sandbox (some browser tests, for example) will fail their baseline, and that project will only ever get proposals.
+- Checks that cannot run inside the sandbox will fail their baseline, and that project will only ever get proposals. Tests that need a local service on an ordinary port are the usual case; list the port in `sandbox.allowPorts`.
 
 Text in a repository can be written by anyone, and a model can be talked into things. These limits reduce what a manipulated model could do. They do not make it impossible. In particular, the merge rules catch careless and mislabelled changes, not one written on purpose to pass them, so read what it merges.
 
