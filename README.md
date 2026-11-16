@@ -48,7 +48,7 @@ What this does **not** cover, stated plainly:
 - `sandbox-exec` is deprecated by Apple, though present on current macOS. Other platforms have no sandbox here; the job refuses to run there unless you set `allowUnsandboxed`.
 - Checks that cannot run inside the sandbox (some browser tests, for example) will fail their baseline, and that project will only ever get proposals.
 
-Text in a repository can be written by anyone, and a model can be talked into things. These limits reduce what a manipulated model could do. They do not make it impossible.
+Text in a repository can be written by anyone, and a model can be talked into things. These limits reduce what a manipulated model could do. They do not make it impossible. In particular, the merge rules catch careless and mislabelled changes, not one written on purpose to pass them, so read what it merges.
 
 ## Prerequisites
 
