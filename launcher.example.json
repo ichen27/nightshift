@@ -1,0 +1,13 @@
+{
+  "id": "nightshift",
+  "name": "Nightshift",
+  "description": "Nightly upkeep for your repositories, with a report of what changed.",
+  "icon": "NS",
+  "color": "#d9dcea",
+  "tags": ["maintenance"],
+  "cwd": "/absolute/path/to/nightshift",
+  "command": ["/absolute/path/to/node", "src/main.mjs"],
+  "port": 8950,
+  "healthPath": "/health",
+  "runtime": "native"
+}

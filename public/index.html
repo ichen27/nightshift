@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Nightshift</title>
+    <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header class="top">
+        <h1>Nightshift</h1>
+        <p id="next-run" class="muted"></p>
+      </header>
+
+      <form id="add-form" class="add" novalidate>
+        <label class="sr-only" for="link">GitHub repository link</label>
+        <input id="link" name="link" type="text" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false">
+        <button id="add-button" type="submit" class="primary">Add project</button>
+      </form>
+      <p id="add-message" class="message" role="alert" hidden></p>
+      <div id="notice" class="notice" role="status" hidden></div>
+
+      <section aria-labelledby="projects-heading">
+        <h2 id="projects-heading" class="label">Projects (0)</h2>
+        <ul id="projects" class="card list"></ul>
+      </section>
+
+      <section aria-labelledby="report-heading">
+        <div class="report-head">
+          <h2 id="report-heading" class="label">Report</h2>
+          <label class="sr-only" for="earlier">Earlier reports</label>
+          <select id="earlier" hidden></select>
+        </div>
+        <div id="run-status" class="notice" role="status" hidden></div>
+        <dl id="counts" class="tiles" hidden>
+          <div class="tile"><dt>Found</dt><dd id="count-found">0</dd></div>
+          <div class="tile"><dt>Proposed</dt><dd id="count-proposed">0</dd></div>
+          <div class="tile"><dt>Did</dt><dd id="count-did">0</dd></div>
+          <div class="tile"><dt>Rolled back</dt><dd id="count-rolled-back">0</dd></div>
+        </dl>
+        <div id="needs-you" class="card needs" hidden>
+          <h3>Needs you</h3>
+          <ul id="needs-you-list"></ul>
+        </div>
+        <ul id="entries" class="card list"></ul>
+      </section>
+    </main>
+  </body>
+</html>

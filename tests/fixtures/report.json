@@ -1,0 +1,83 @@
+{
+  "date": "2026-01-05",
+  "startedAt": "2026-01-05T07:00:02.000Z",
+  "finishedAt": "2026-01-05T07:41:10.000Z",
+  "model": "example-model",
+  "outcome": "ok",
+  "reason": null,
+  "entries": [
+    {
+      "project": "octo/app",
+      "tag": "did",
+      "title": "Reject empty names when saving a profile",
+      "detail": "saveProfile accepted an empty name and stored it. It now returns a validation error, with a test.",
+      "prUrl": "https://github.com/octo/app/pull/12",
+      "security": false,
+      "reason": null,
+      "impact": {
+        "measured": [
+          { "name": "Tests passed", "before": 41, "after": 42 },
+          { "name": "Checks pass", "before": "yes", "after": "yes" }
+        ],
+        "claims": []
+      },
+      "liveState": "running"
+    },
+    {
+      "project": "octo/app",
+      "tag": "found",
+      "title": "Two date helpers do the same thing",
+      "detail": "formatDay and toDayString are identical apart from the name.",
+      "prUrl": null,
+      "security": false,
+      "reason": null,
+      "impact": { "measured": [], "claims": [] },
+      "liveState": null
+    },
+    {
+      "project": "octo/site",
+      "tag": "proposed",
+      "title": "Update the HTTP client to the next major version",
+      "detail": "The pinned version is two majors behind. The upgrade changes the retry defaults.",
+      "prUrl": "https://github.com/octo/site/pull/7",
+      "security": false,
+      "reason": "Major version upgrade",
+      "impact": { "measured": [], "claims": ["Fewer open connections under load"] },
+      "liveState": null
+    },
+    {
+      "project": "octo/site",
+      "tag": "proposed",
+      "title": "Tighten how upload names are checked",
+      "detail": "Kept out of the public repository until it is fixed.",
+      "prUrl": null,
+      "security": true,
+      "reason": "No test proves the change",
+      "impact": { "measured": [], "claims": [] },
+      "liveState": null
+    },
+    {
+      "project": "octo/api",
+      "tag": "did",
+      "title": "Stop retrying requests that can never succeed",
+      "detail": "The change was merged, the service did not come back healthy, and the change was undone.",
+      "prUrl": "https://github.com/octo/api/pull/31",
+      "security": false,
+      "reason": null,
+      "impact": { "measured": [], "claims": [] },
+      "liveState": "rolled-back"
+    },
+    {
+      "project": "octo/tools",
+      "tag": "found",
+      "title": "Nothing worth changing tonight",
+      "detail": "The checks pass and nothing stood out.",
+      "prUrl": null,
+      "security": false,
+      "reason": null,
+      "impact": { "measured": [], "claims": [] },
+      "liveState": null
+    }
+  ],
+  "needsYou": ["octo/site has an open proposal: Update the HTTP client to the next major version"]
+}

@@ -54,3 +54,9 @@ test('settings file values override the defaults and unknown keys are dropped', 
 test('a settings file that is not an object falls back to the defaults', () => {
   assert.deepEqual(loadSettings({ read: () => 'nonsense' }), DEFAULT_SETTINGS);
 });
+
+test('allowed hosts are loopback on the port, plus NIGHTSHIFT_ALLOWED_HOSTS', () => {
+  assert.deepEqual(loadConfig({ APP_DATA_DIR: '/b' }).allowedHosts, ['127.0.0.1:8950', 'localhost:8950']);
+  const c = loadConfig({ APP_DATA_DIR: '/b', PORT: '9001', NIGHTSHIFT_ALLOWED_HOSTS: ' App.Example.com, other.example.com ,' });
+  assert.deepEqual(c.allowedHosts, ['127.0.0.1:9001', 'localhost:9001', 'app.example.com', 'other.example.com']);
+});

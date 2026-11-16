@@ -23,10 +23,18 @@ export function loadConfig(env = process.env) {
   if (!dataDir) {
     throw new Error('No data folder: set NIGHTSHIFT_DATA_DIR or APP_DATA_DIR.');
   }
+  const port = parsePort(env.PORT);
+  const extraHosts = (env.NIGHTSHIFT_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
   return {
     dataDir,
     host: env.HOST || '127.0.0.1',
-    port: parsePort(env.PORT),
+    port,
+    // Host names the web app answers to. Anything else is refused, which stops a hostile
+    // page from reaching the app by pointing its own domain at this machine.
+    allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`, ...extraHosts],
     ghPath: env.NIGHTSHIFT_GH || 'gh',
     gitPath: env.NIGHTSHIFT_GIT || 'git',
     claudePath: env.NIGHTSHIFT_CLAUDE || 'claude',
