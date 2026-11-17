@@ -39,6 +39,10 @@ chmod 600 "$NIGHTSHIFT_DATA_DIR/claude-token"
 
 The job passes it to the model's own process and nowhere else. It does not use your everyday Claude Code sign-in or settings.
 
+Because the run starts from empty settings, the model is whatever Claude Code picks by default for that account, not the one you chose in your everyday settings. Each report records which model was used. Usage counts against the account that created the token.
+
+The token is long-lived but does expire. When it stops working, the report says "Claude is not signed in": create a new one the same way.
+
 ## How a project's checks are found
 
 In order: `ci/run.sh` if the repository has one (it is expected to install what it needs); otherwise the `ci` script in `package.json`, then the `test` script; otherwise `swift test` for a Swift package. For an npm script, the job first runs `npm ci` in every folder that has a `package-lock.json`, the root first, so a repository with more than one package is installed fully. A repository with none of these has no checks as far as the job can tell, and nothing is ever merged there.
