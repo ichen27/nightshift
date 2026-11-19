@@ -164,10 +164,21 @@ export async function visitProject({ project, deps, date, dryRun }) {
     store.write(file, { checkCommand: measured.checkCommand, output: measured.failureOutput });
     return file;
   };
-  const baseline = await steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
+  const measureNow = () => steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
+  let baseline = await measureNow();
   const baselineLog = keepFailure(baseline, 'before');
+  // Checks that fail and then pass on the same code are unreliable, not broken, so the visit
+  // goes on from the passing run. Only this run gets a second try: with the change in place,
+  // a failure counts the first time.
+  let unreliable = false;
   if (baseline.checksPass === false) {
-    needsYou.push(`${name}: the checks are failing on ${base}, so nothing can be merged.`);
+    const again = await measureNow();
+    if (again.checksPass === true) {
+      baseline = again;
+      unreliable = true;
+    } else {
+      needsYou.push(`${name}: the checks are failing on ${base}, so nothing can be merged.`);
+    }
   }
 
   // 4. The model inspects, and may make one change.
@@ -191,9 +202,12 @@ export async function visitProject({ project, deps, date, dryRun }) {
     history.seenTitles.push(item.title);
     return true;
   };
+  const where = baselineLog ? ` The end of the output is kept in the data folder at ${baselineLog}.` : '';
   if (baseline.checksPass === false && fresh({ title: "The repository's checks are failing" })) {
-    const where = baselineLog ? ` The end of the output is kept in the data folder at ${baselineLog}.` : '';
     entries.push(entry(name, 'found', "The repository's checks are failing", `They fail before any change is made.${where}`));
+  }
+  if (unreliable && fresh({ title: "The repository's checks fail now and then" })) {
+    entries.push(entry(name, 'found', "The repository's checks fail now and then", `Before any change was made, they failed on the first try and passed when run again.${where}`));
   }
   for (const item of agent.output.findings.filter(fresh)) {
     entries.push(entry(name, 'found', item.title, item.detail, { security: item.security }));
@@ -234,7 +248,7 @@ export async function visitProject({ project, deps, date, dryRun }) {
     const { sha } = imported;
     // Measure exactly what would be pushed: a clean tree at the imported commit.
     await steps.resetTree({ run, gitPath, repoDir: ws.repoDir, dir: ws.dir, ref: sha, identity });
-    const after = await steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
+    const after = await measureNow();
     keepFailure(after, 'after');
     const stats = await steps.changeStats({ run, gitPath, repoDir: ws.repoDir, baseSha: ws.baseSha, sha });
     const manifests = await steps.readManifests({ run, gitPath, repoDir: ws.repoDir, baseSha: ws.baseSha, sha, files: stats.files });

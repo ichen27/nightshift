@@ -476,3 +476,29 @@ test('checks that fail with the change also keep the end of their output', async
   await w.night();
   assert.equal(w.store.read('logs/2026-01-05/octo__app-after.json', null).output, 'FAIL tests/b.test.js');
 });
+
+test('checks that fail once before the change and pass when run again do not block the merge', async () => {
+  const failing = { ...ok, checksPass: false, failureOutput: 'FAIL tests/sometimes.test.js' };
+  const w = world({ measures: [failing, ok, { ...ok, tests: { ran: 42, passed: 42 } }] });
+  const report = await w.night();
+  assert.equal(w.did('measure').length, 3, 'before, before again, and with the change');
+  assert.equal(entriesOf(report, 'did').length, 1);
+  assert.equal(w.did('provesItself')[0][1].baselinePass, true);
+  assert.match(w.did('openPr')[0][1].body, /Tests run: 41 → 42/);
+  const unreliable = entriesOf(report, 'found').find((e) => e.title === "The repository's checks fail now and then");
+  assert.match(unreliable.detail, /they failed on the first try and passed when run again/);
+  assert.match(unreliable.detail, /logs\/2026-01-05\/octo__app-before\.json/);
+  assert.equal(w.store.read('logs/2026-01-05/octo__app-before.json', null).output, 'FAIL tests/sometimes.test.js');
+  assert.deepEqual(report.needsYou, []);
+});
+
+test('checks that fail twice before the change still stop the merge', async () => {
+  const failing = { ...ok, checksPass: false, failureOutput: 'FAIL tests/a.test.js' };
+  const w = world({ measures: [failing, failing, { ...ok, tests: { ran: 42, passed: 42 } }], proof: { proven: false, note: 'The checks were already failing before the change.' } });
+  const report = await w.night();
+  assert.equal(w.did('measure').length, 3);
+  assert.equal(w.did('merge').length, 0);
+  assert.equal(entriesOf(report, 'proposed').find((e) => e.prUrl).reason, 'The checks were already failing before the change');
+  assert.ok(report.needsYou.includes('octo/app: the checks are failing on trunk, so nothing can be merged.'));
+  assert.equal(entriesOf(report, 'found').some((e) => e.title === "The repository's checks fail now and then"), false);
+});

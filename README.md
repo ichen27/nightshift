@@ -13,7 +13,7 @@ The screenshot uses made-up repositories.
 ## Status
 
 - **Web app:** working. Add and remove projects, read reports.
-- **Nightly job:** implemented and covered by unit tests with every outside system faked. Cloning, installing, running a repository's checks inside the sandbox and reading the results have been exercised against real repositories. The model step has been run for real with Claude Code 2.1.301: it signs in with the token, works through the allow-list proxy inside the sandbox, and returns its report in the expected shape, and a model asked to try the blocked routes (a git remote, `gh`, `git push`, files outside its folder, a local service, launching an app) was refused on each. One supervised inspect-only run (`--dry-run`) on a real repository completed and produced an accurate report. The job has **not yet made or merged a real change**, so expect adjustments there.
+- **Nightly job:** implemented and covered by unit tests with every outside system faked. Cloning, installing, running a repository's checks inside the sandbox and reading the results have been exercised against real repositories. The model step has been run for real with Claude Code 2.1.301: it signs in with the token, works through the allow-list proxy inside the sandbox, and returns its report in the expected shape, and a model asked to try the blocked routes (a git remote, `gh`, `git push`, files outside its folder, a local service, launching an app) was refused on each. One supervised inspect-only run (`--dry-run`) and one supervised real run on a real repository completed: the real run made a change, pushed it and opened a pull request, and correctly left it unmerged. The job has **not yet merged a change or put one live by itself**, so expect adjustments there.
 - **Schedule:** an installer exists for macOS. Run the job by hand first.
 - **Platform:** the nightly job needs macOS, because that is where its sandbox comes from. The web app runs anywhere Node does.
 
@@ -21,7 +21,7 @@ The screenshot uses made-up repositories.
 
 A change is merged only when all of these hold. Otherwise it is left as a proposal with the reason.
 
-1. The repository's own checks pass before the change and with it, and the pull request's checks pass on GitHub.
+1. The repository's own checks pass before the change and with it, and the pull request's checks pass on GitHub. Checks that fail before the change get one second try; with the change, a failure counts the first time.
 2. No fewer tests run than before, and the change does not alter how the checks run.
 3. It touches nothing sensitive: CI, deploy configuration, environment files, database migrations, package-manager or git configuration, agent instruction files, or anything that looks like sign-in or payment code.
 4. It is not a major version upgrade.
