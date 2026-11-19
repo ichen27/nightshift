@@ -20,7 +20,7 @@ These shaped most decisions.
 - **The web app** (`src/main.mjs`): a page to add a project by pasting a link, remove one, and read each night's report.
 - **The nightly job** (`src/cli.mjs run`): started by a schedule, it reads the project list, visits a few projects and writes the report.
 
-They share a data folder and nothing else: `projects.json`, `settings.json`, `reports/<date>.json`, `history/<owner>__<repo>.json`, `workspaces/<owner>__<repo>/`, `run.lock`, and `schedule.json` when a schedule is installed.
+They share a data folder and nothing else: `projects.json`, `settings.json`, `reports/<date>.json`, `history/<owner>__<repo>.json`, `logs/<date>/` (the end of any failing check's output), `workspaces/<owner>__<repo>/`, `run.lock`, and `schedule.json` when a schedule is installed.
 
 ## Who may do what
 

@@ -157,7 +157,15 @@ export async function visitProject({ project, deps, date, dryRun }) {
   const pathPrefix = listedTools ? listedTools[1] : [];
   const sandboxed = (argv, options = {}) => restrictedRun(argv, { ...options, pathPrefix });
   const checkRunFor = (dir) => (argv, options = {}) => sandboxed(argv, { ...options, writable: [dir], cacheDir: ws.cacheDir });
+  // Keeps the end of a failing check's output in the data folder and returns where, or null.
+  const keepFailure = (measured, when) => {
+    if (measured.checksPass !== false || !measured.failureOutput) return null;
+    const file = `logs/${date}/${projectKey(project.owner, project.repo)}-${when}.json`;
+    store.write(file, { checkCommand: measured.checkCommand, output: measured.failureOutput });
+    return file;
+  };
   const baseline = await steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
+  const baselineLog = keepFailure(baseline, 'before');
   if (baseline.checksPass === false) {
     needsYou.push(`${name}: the checks are failing on ${base}, so nothing can be merged.`);
   }
@@ -184,7 +192,8 @@ export async function visitProject({ project, deps, date, dryRun }) {
     return true;
   };
   if (baseline.checksPass === false && fresh({ title: "The repository's checks are failing" })) {
-    entries.push(entry(name, 'found', "The repository's checks are failing", 'They fail before any change is made.'));
+    const where = baselineLog ? ` The end of the output is kept in the data folder at ${baselineLog}.` : '';
+    entries.push(entry(name, 'found', "The repository's checks are failing", `They fail before any change is made.${where}`));
   }
   for (const item of agent.output.findings.filter(fresh)) {
     entries.push(entry(name, 'found', item.title, item.detail, { security: item.security }));
@@ -226,6 +235,7 @@ export async function visitProject({ project, deps, date, dryRun }) {
     // Measure exactly what would be pushed: a clean tree at the imported commit.
     await steps.resetTree({ run, gitPath, repoDir: ws.repoDir, dir: ws.dir, ref: sha, identity });
     const after = await steps.measure({ run: checkRunFor(ws.dir), dir: ws.dir, fs, timeoutMs: left(CHECK_LIMIT_MS) });
+    keepFailure(after, 'after');
     const stats = await steps.changeStats({ run, gitPath, repoDir: ws.repoDir, baseSha: ws.baseSha, sha });
     const manifests = await steps.readManifests({ run, gitPath, repoDir: ws.repoDir, baseSha: ws.baseSha, sha, files: stats.files });
     const proof = await steps.provesItself({

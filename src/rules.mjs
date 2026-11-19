@@ -259,6 +259,8 @@ export function decide({ change, stats, before, after, proof, manifests = {} }) 
   const { files } = stats;
   if (files.length === 0) return propose('No change was made');
   if (after.checksPass !== true) return propose("The repository's checks do not pass with the change");
+  // With checks that were already failing, "they pass with the change" proves nothing about the change.
+  if (before?.checksPass === false) return propose('The checks were already failing before the change');
   if (before?.tests && after.tests && after.tests.ran < before.tests.ran) return propose('Fewer tests ran than before');
   const sensitive = sensitiveReason(files);
   if (sensitive) return propose(sensitive);

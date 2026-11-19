@@ -111,7 +111,7 @@ test('a fix without proof is proposed', () => {
 });
 test('checks that were already failing do not stand in for a test', () => {
   const fixed = { before: { checksPass: false, tests: null }, proof: { proven: false, note: 'The checks were already failing before the change.' } };
-  assert.deepEqual(verdict({ ...fixed, stats: stats(['src/profile.js']) }), NO_PROOF);
+  assert.deepEqual(verdict({ ...fixed, stats: stats(['src/profile.js']) }), { merge: false, reason: 'The checks were already failing before the change' });
 });
 
 const patch = (afterPkg, extra = {}) => ({
@@ -364,4 +364,11 @@ test('the lockfile\'s own root entry may change only together with its package.j
   assert.equal(verdict(both).merge, true);
   const nested = patch(rootPkg, { stats: stats(['web/package-lock.json']), manifests: { ...manifestsOf({ ...rootPkg, dependencies: { a: '^1.0.4' } }), 'web/package-lock.json': { before, after } } });
   assert.deepEqual(verdict(nested), NO_PROOF, 'the package.json beside the lockfile is the one that counts');
+});
+
+test('nothing is merged when the checks were already failing before the change', () => {
+  const failing = { checksPass: false, tests: { ran: 40, passed: 39 } };
+  assert.deepEqual(verdict({ before: failing }), { merge: false, reason: 'The checks were already failing before the change' });
+  const docs = verdict({ before: failing, change: { kind: 'docs', majorUpgrade: false }, stats: stats(['README.md']), proof: unproven });
+  assert.deepEqual(docs, { merge: false, reason: 'The checks were already failing before the change' });
 });

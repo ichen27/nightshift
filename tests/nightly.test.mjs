@@ -462,3 +462,17 @@ test('a project\'s tool folders are put on the PATH of everything run for it', a
   await plain.night();
   assert.deepEqual(plain.did('restrictedRun')[0][1].options.pathPrefix, []);
 });
+
+test('the end of a failing check\'s output is kept in the data folder, and the report says where', async () => {
+  const failing = { ...ok, checksPass: false, failureOutput: 'FAIL tests/a.test.js' };
+  const w = world({ measures: [failing], agent: { ok: true, output: { findings: [], change: null, proposals: [] }, model: 'm', failure: null } });
+  const report = await w.night();
+  assert.deepEqual(w.store.read('logs/2026-01-05/octo__app-before.json', null), { checkCommand: ['npm', 'test'], output: 'FAIL tests/a.test.js' });
+  assert.match(report.entries[0].detail, /logs\/2026-01-05\/octo__app-before\.json/);
+});
+
+test('checks that fail with the change also keep the end of their output', async () => {
+  const w = world({ measures: [ok, { ...ok, checksPass: false, failureOutput: 'FAIL tests/b.test.js' }] });
+  await w.night();
+  assert.equal(w.store.read('logs/2026-01-05/octo__app-after.json', null).output, 'FAIL tests/b.test.js');
+});
