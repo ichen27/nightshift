@@ -21,7 +21,7 @@ The screenshot uses made-up repositories.
 
 A change is merged only when all of these hold. Otherwise it is left as a proposal with the reason.
 
-1. The repository's own checks pass with the change, and the pull request's checks pass on GitHub.
+1. The repository's own checks pass before the change and with it, and the pull request's checks pass on GitHub.
 2. No fewer tests run than before, and the change does not alter how the checks run.
 3. It touches nothing sensitive: CI, deploy configuration, environment files, database migrations, package-manager or git configuration, agent instruction files, or anything that looks like sign-in or payment code.
 4. It is not a major version upgrade.

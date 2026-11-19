@@ -115,14 +115,20 @@ async function countVulnerabilities({ run, dir, fs, timeoutMs }) {
   }
 }
 
+const FAILURE_OUTPUT_MAX = 4000;
+
+// `failureOutput` is present only when the check failed: the end of what it printed, so a
+// person can see which test broke. It comes from code the job does not trust; treat it as text.
 export async function measure({ run, dir, fs, timeoutMs }) {
   const check = await runCheck({ run, dir, fs, timeoutMs });
-  return {
+  const measured = {
     checkCommand: check.checkCommand,
     checksPass: check.pass,
     tests: check.pass === null ? null : parseTestCounts(check.output),
     vulnerabilities: await countVulnerabilities({ run, dir, fs, timeoutMs }),
   };
+  if (check.pass === false) measured.failureOutput = check.output.replace(ANSI, '').trimEnd().slice(-FAILURE_OUTPUT_MAX);
+  return measured;
 }
 
 const NOT_MEASURED = 'not measured';

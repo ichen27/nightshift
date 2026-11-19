@@ -78,7 +78,9 @@ test('measure runs npm ci, then the check, then the audit, and reads the counts'
     [has('npm', 'audit'), { code: 1, stdout: JSON.stringify({ metadata: { vulnerabilities: { total: 3 } } }) }],
   ]);
   const m = await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
-  assert.deepEqual(m, { checkCommand: ['npm', 'test'], checksPass: false, tests: { ran: 12, passed: 11 }, vulnerabilities: 3 });
+  assert.deepEqual(m, {
+    checkCommand: ['npm', 'test'], checksPass: false, tests: { ran: 12, passed: 11 }, vulnerabilities: 3, failureOutput: '# tests 12\n# pass 11',
+  });
   assert.deepEqual(calls.map((c) => c.argv.join(' ')), ['npm ci', 'npm test', 'npm audit --json']);
   assert.ok(calls.every((c) => c.options.cwd === '/repo'));
   assert.equal(calls[1].options.timeoutMs, 1000);
@@ -168,4 +170,21 @@ test('a repository with its own ci/run.sh is left to install its own dependencie
   const { run, calls } = fakeRun([[() => true, {}]]);
   await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
   assert.deepEqual(calls.map((c) => c.argv.join(' ')), ['bash ci/run.sh', 'npm audit --json']);
+});
+
+test('a failing check keeps the end of its output, without colour codes', async () => {
+  const fs = fakeFs({ 'ci/run.sh': '' });
+  const noisy = `${'x'.repeat(9000)}\n\u001b[31mFAIL\u001b[0m tests/a.test.js`;
+  const { run } = fakeRun([[has('bash', 'ci/run.sh'), { code: 1, stdout: noisy, stderr: 'boom' }]]);
+  const m = await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
+  assert.equal(m.checksPass, false);
+  assert.match(m.failureOutput, /FAIL tests\/a\.test\.js\nboom$/);
+  assert.equal(m.failureOutput.length <= 4000, true);
+});
+
+test('a failed install keeps the end of the install output', async () => {
+  const fs = fakeFs({ 'package.json': pkg({ test: 'x' }), 'package-lock.json': '{}' });
+  const { run } = fakeRun([[has('npm', 'ci'), { code: 1, stderr: 'npm error missing lockfile entry' }], [has('npm', 'audit'), { stdout: 'not json' }]]);
+  const m = await measure({ run, dir: '/repo', fs, timeoutMs: 1000 });
+  assert.match(m.failureOutput, /missing lockfile entry$/);
 });
